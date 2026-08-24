@@ -45,39 +45,81 @@ export const getIdsDescendientesPorId = async (idCategoria: number): Promise<num
   return result.map(r => r.id_categoria);
 };
 
-export const findAll = () => {
-  return prisma.categoria.findMany({
-    include: { subcategorias: true },
-    orderBy: { orden: 'asc' },
-  });
+type NodoArbol<T> = T & { subcategorias: NodoArbol<T>[] };
+
+type FilaCategoria = {
+  idCategoria: number;
+  idCategoriaPadre: number | null;
+  orden: number;
 };
 
-// Categorías raíz activas con subcategorías activas (catálogo público)
-export const findRaiz = () => {
-  return prisma.categoria.findMany({
-    where: { idCategoriaPadre: null, estado: 'Activo' },
-    include: {
-      subcategorias: {
-        where: { estado: 'Activo' },
-      },
-    },
+// Indexa filas planas en un Map por id y cuelga cada nodo bajo su padre (N niveles).
+const mapearNodos = <T extends FilaCategoria>(nodos: T[]): Map<number, NodoArbol<T>> => {
+  const mapa = new Map<number, NodoArbol<T>>();
+  for (const nodo of nodos) {
+    mapa.set(nodo.idCategoria, { ...nodo, subcategorias: [] });
+  }
+  for (const nodo of nodos) {
+    if (nodo.idCategoriaPadre === null) continue;
+    const padre = mapa.get(nodo.idCategoriaPadre);
+    const hijo = mapa.get(nodo.idCategoria);
+    if (padre && hijo) {
+      padre.subcategorias.push(hijo);
+    }
+  }
+  return mapa;
+};
+
+// Devuelve solo las raíces (idCategoriaPadre null o inexistente en el lote),
+// cada una con su subárbol completo anidado y ordenado por "orden".
+const construirArbol = <T extends FilaCategoria>(nodos: T[]): NodoArbol<T>[] => {
+  const mapa = mapearNodos(nodos);
+  const raices: NodoArbol<T>[] = [];
+  for (const nodo of nodos) {
+    if (nodo.idCategoriaPadre === null || !mapa.has(nodo.idCategoriaPadre)) {
+      raices.push(mapa.get(nodo.idCategoria)!);
+    }
+  }
+  for (const nodo of mapa.values()) {
+    nodo.subcategorias.sort((a, b) => a.orden - b.orden);
+  }
+  return raices.sort((a, b) => a.orden - b.orden);
+};
+
+// Localiza un nodo por id dentro del lote y lo devuelve con su subárbol ya anidado.
+const extraerSubarbol = <T extends FilaCategoria>(nodos: T[], idObjetivo: number): NodoArbol<T> | null => {
+  return mapearNodos(nodos).get(idObjetivo) ?? null;
+};
+
+// Todas las categorías (activas e inactivas) como raíces con subárbol completo (admin)
+export const findAll = async () => {
+  const categorias = await prisma.categoria.findMany({ orderBy: { orden: 'asc' } });
+  return construirArbol(categorias);
+};
+
+// Categorías raíz activas con su subárbol activo completo (catálogo público)
+export const findRaiz = async () => {
+  const categorias = await prisma.categoria.findMany({
+    where: { estado: 'Activo' },
     orderBy: { orden: 'asc' },
   });
+  return construirArbol(categorias);
 };
 
 export const findById = (idCategoria: number | string) => {
   return prisma.categoria.findUnique({ where: { idCategoria: Number(idCategoria) } });
 };
 
-export const findByIdConHijos = (idCategoria: number | string) => {
-  return prisma.categoria.findUnique({
-    where: { idCategoria: Number(idCategoria) },
-    include: { subcategorias: true },
-  });
+export const findByIdConHijos = async (idCategoria: number | string) => {
+  const categorias = await prisma.categoria.findMany({ orderBy: { orden: 'asc' } });
+  return extraerSubarbol(categorias, Number(idCategoria));
 };
 
-export const findBySlug = (slug: string) => {
-  return prisma.categoria.findUnique({ where: { slug }, include: { subcategorias: true } });
+export const findBySlug = async (slug: string) => {
+  const categorias = await prisma.categoria.findMany({ orderBy: { orden: 'asc' } });
+  const objetivo = categorias.find((categoria) => categoria.slug === slug);
+  if (!objetivo) return null;
+  return extraerSubarbol(categorias, objetivo.idCategoria);
 };
 
 // Verificar si ya existe una categoría activa con el mismo slug (excluyendo una ID)

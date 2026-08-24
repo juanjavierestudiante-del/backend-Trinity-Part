@@ -1,0 +1,255 @@
+// ============================================
+// PRISMA SCHEMA - Trinity Party
+// ============================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// USUARIO ADMIN (para login del panel)
+// ============================================
+model Usuario {
+  id_usuario   Int      @id @default(autoincrement())
+  nombre       String   @db.VarChar(150)
+  email        String   @unique @db.VarChar(150)
+  password     String   @db.VarChar(255) // hash bcrypt
+  rol          RolUsuario @default(ADMIN)
+  estado       EstadoGenerico @default(Activo)
+  fechaRegistro DateTime @default(now()) @map("fecha_registro")
+
+  @@map("usuario")
+}
+
+enum RolUsuario {
+  ADMIN
+  EMPLEADO
+}
+
+enum EstadoGenerico {
+  Activo
+  Inactivo
+}
+
+// ============================================
+// CATEGORIA (árbol de categorías)
+// ============================================
+model Categoria {
+  idCategoria       Int      @id @default(autoincrement()) @map("id_categoria")
+  idCategoriaPadre  Int?     @map("id_categoria_padre")
+  nombre            String   @unique @db.VarChar(100)
+  slug              String   @unique @db.VarChar(150)
+  descripcion       String?  @db.Text
+  imagenPublicId    String?  @map("imagen_public_id") @db.VarChar(255)
+  imagenUrl         String?  @map("imagen_url") @db.VarChar(500)
+  orden             Int      @default(0)
+  estado            EstadoGenerico @default(Activo)
+
+  categoriaPadre    Categoria?  @relation("CategoriaPadre", fields: [idCategoriaPadre], references: [idCategoria])
+  subcategorias     Categoria[] @relation("CategoriaPadre")
+  productos         Producto[]
+
+  @@map("categoria")
+}
+
+// ============================================
+// MARCA
+// ============================================
+model Marca {
+  idMarca  Int     @id @default(autoincrement()) @map("id_marca")
+  nombre   String  @unique @db.VarChar(100)
+  variantes ProductoVariante[]
+
+  @@map("marca")
+}
+
+// ============================================
+// UNIDAD DE MEDIDA
+// ============================================
+model UnidadMedida {
+  idUnidad     Int     @id @default(autoincrement()) @map("id_unidad")
+  nombre       String  @db.VarChar(50)
+  abreviatura  String  @db.VarChar(10)
+  variantes    ProductoVariante[]
+
+  @@map("unidad_medida")
+}
+
+// ============================================
+// PROVEEDOR
+// ============================================
+model Proveedor {
+  idProveedor Int     @id @default(autoincrement()) @map("id_proveedor")
+  nombre      String  @db.VarChar(150)
+  telefono    String? @db.VarChar(20)
+  correo      String? @db.VarChar(150)
+
+  varianteProveedor VarianteProveedor[]
+
+  @@map("proveedor")
+}
+
+// ============================================
+// ATRIBUTO / VALOR_ATRIBUTO
+// ============================================
+model Atributo {
+  idAtributo Int     @id @default(autoincrement()) @map("id_atributo")
+  nombre     String  @unique @db.VarChar(100)
+
+  valores    ValorAtributo[]
+
+  @@map("atributo")
+}
+
+model ValorAtributo {
+  idValor    Int      @id @default(autoincrement()) @map("id_valor")
+  idAtributo Int      @map("id_atributo")
+  valor      String   @db.VarChar(100)
+
+  atributo   Atributo @relation(fields: [idAtributo], references: [idAtributo], onDelete: Cascade)
+  varianteAtributo VarianteAtributo[]
+
+  @@map("valor_atributo")
+}
+
+// ============================================
+// PRODUCTO
+// ============================================
+model Producto {
+  idProducto         Int      @id @default(autoincrement()) @map("id_producto")
+  idCategoria        Int      @map("id_categoria")
+  nombre             String   @db.VarChar(150)
+  slug               String   @unique @db.VarChar(180)
+  rating             Decimal  @default(4.0) @db.Decimal(2, 1)//agregando rating promedio de 1 a 5
+  descripcionCorta   String?  @map("descripcion_corta") @db.VarChar(255)
+  descripcion        String?  @db.Text
+  destacado          Boolean  @default(false)
+  metaTitulo         String?  @map("meta_titulo") @db.VarChar(160)
+  metaDescripcion    String?  @map("meta_descripcion") @db.VarChar(255)
+  estado             EstadoProducto @default(Borrador)
+  fechaRegistro      DateTime @default(now()) @map("fecha_registro")
+  fechaActualizacion DateTime @updatedAt @map("fecha_actualizacion")
+  fechaPublicacion   DateTime? @map("fecha_publicacion")
+
+  categoria          Categoria @relation(fields: [idCategoria], references: [idCategoria])
+  imagenes           ImagenProducto[]
+  variantes          ProductoVariante[]
+
+  @@map("producto")
+}
+
+enum EstadoProducto {
+  Borrador
+  Activo
+  Inactivo
+  Descontinuado
+}
+
+// ============================================
+// IMAGEN_PRODUCTO (Cloudinary)
+// ============================================
+model ImagenProducto {
+  idImagen    Int      @id @default(autoincrement()) @map("id_imagen")
+  idProducto  Int      @map("id_producto")
+  publicId    String   @map("public_id") @db.VarChar(255)
+  url         String   @db.VarChar(500)
+  principal   Boolean  @default(false)
+  ordenImagen Int      @default(1) @map("orden_imagen")
+
+  producto    Producto @relation(fields: [idProducto], references: [idProducto], onDelete: Cascade)
+
+  @@map("imagen_producto")
+}
+
+// ============================================
+// PRODUCTO_VARIANTE
+// ============================================
+model ProductoVariante {
+  idVariante         Int      @id @default(autoincrement()) @map("id_variante")
+  idProducto         Int      @map("id_producto")
+  idMarca            Int?     @map("id_marca")
+  idUnidad           Int?     @map("id_unidad")
+  cantidadContenido  Decimal  @default(1.00) @map("cantidad_contenido") @db.Decimal(10, 2)
+  sku                String   @unique @db.VarChar(50)
+  codigoBarras       String?  @unique @map("codigo_barras") @db.VarChar(100)
+  precioVenta        Decimal  @map("precio_venta") @db.Decimal(10, 2)
+  precioOferta       Decimal? @map("precio_oferta") @db.Decimal(10, 2)
+  peso               Decimal? @db.Decimal(10, 2)
+  estado             EstadoGenerico @default(Activo)
+
+  producto           Producto @relation(fields: [idProducto], references: [idProducto], onDelete: Cascade)
+  marca              Marca?   @relation(fields: [idMarca], references: [idMarca])
+  unidad             UnidadMedida? @relation(fields: [idUnidad], references: [idUnidad])
+
+  imagenes           ImagenVariante[]
+  inventario         Inventario?
+  varianteAtributo   VarianteAtributo[]
+  varianteProveedor  VarianteProveedor[]
+
+  @@map("producto_variante")
+}
+
+// ============================================
+// IMAGEN_VARIANTE (Cloudinary)
+// ============================================
+model ImagenVariante {
+  idImagen    Int      @id @default(autoincrement()) @map("id_imagen")
+  idVariante  Int      @map("id_variante")
+  publicId    String   @map("public_id") @db.VarChar(255)
+  url         String   @db.VarChar(500)
+  principal   Boolean  @default(false)
+  ordenImagen Int      @default(1) @map("orden_imagen")
+
+  variante    ProductoVariante @relation(fields: [idVariante], references: [idVariante], onDelete: Cascade)
+
+  @@map("imagen_variante")
+}
+
+// ============================================
+// INVENTARIO (1 a 1 con variante)
+// ============================================
+model Inventario {
+  idInventario Int      @id @default(autoincrement()) @map("id_inventario")
+  idVariante   Int      @unique @map("id_variante")
+  stockActual  Int      @default(0) @map("stock_actual")
+  stockMinimo  Int      @default(0) @map("stock_minimo")
+  stockMaximo  Int?     @map("stock_maximo")
+
+  variante     ProductoVariante @relation(fields: [idVariante], references: [idVariante], onDelete: Cascade)
+
+  @@map("inventario")
+}
+
+// ============================================
+// VARIANTE_ATRIBUTO (N a N)
+// ============================================
+model VarianteAtributo {
+  idVariante Int @map("id_variante")
+  idValor    Int @map("id_valor")
+
+  variante   ProductoVariante @relation(fields: [idVariante], references: [idVariante], onDelete: Cascade)
+  valorAtributo ValorAtributo @relation(fields: [idValor], references: [idValor], onDelete: Cascade)
+
+  @@id([idVariante, idValor])
+  @@map("variante_atributo")
+}
+
+// ============================================
+// VARIANTE_PROVEEDOR (N a N con precio de compra)
+// ============================================
+model VarianteProveedor {
+  idVariante    Int      @map("id_variante")
+  idProveedor   Int      @map("id_proveedor")
+  precioCompra  Decimal? @map("precio_compra") @db.Decimal(10, 2)
+
+  variante      ProductoVariante @relation(fields: [idVariante], references: [idVariante], onDelete: Cascade)
+  proveedor     Proveedor @relation(fields: [idProveedor], references: [idProveedor], onDelete: Cascade)
+
+  @@id([idVariante, idProveedor])
+  @@map("variante_proveedor")
+}

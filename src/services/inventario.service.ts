@@ -1,27 +1,43 @@
 // Lógica de negocio para Inventario.
 
 import * as inventarioRepository from '../repositories/inventario.repository.js';
+import * as productoVarianteRepository from '../repositories/productoVariante.repository.js';
 import { AppError } from '../utils/helpers.js';
+import type { ActualizarInventarioInput } from '../validations/inventario.validation.js';
 
-export const obtenerPorVariante = (idVariante: number | string) =>
-  inventarioRepository.findByVariante(idVariante);
+interface ContextoUsuario {
+  idUsuario?: number | null;
+  motivo?: string | null;
+}
 
-export const actualizarStock = (
-  idVariante: number | string,
-  datos: { stockActual?: number; stockMinimo?: number; stockMaximo?: number }
-) => inventarioRepository.upsert(idVariante, datos);
+export const listar = () => inventarioRepository.findTodos();
 
-// Suma o resta stock (útil para ventas o reposiciones)
-export const ajustarStock = async (idVariante: number | string, cantidad: number) => {
+export const listarAlertas = () => inventarioRepository.findBajoStock();
+
+export const obtenerPorVariante = async (idVariante: number | string) => {
   const inventario = await inventarioRepository.findByVariante(idVariante);
   if (!inventario) {
     throw new AppError('Inventario no encontrado para esta variante', 404);
   }
-  const nuevoStock = inventario.stockActual + cantidad;
-  if (nuevoStock < 0) {
-    throw new AppError('Stock insuficiente', 400);
-  }
-  return inventarioRepository.upsert(idVariante, { stockActual: nuevoStock });
+  return inventario;
 };
 
-export const obtenerAlertasBajoStock = () => inventarioRepository.findBajoStock();
+export const actualizarStock = (
+  idVariante: number | string,
+  datos: ActualizarInventarioInput,
+  ctx: ContextoUsuario = {}
+) => inventarioRepository.upsertConMovimiento(idVariante, datos, ctx);
+
+export const ajustarStock = (
+  idVariante: number | string,
+  cantidad: number,
+  ctx: ContextoUsuario = {}
+) => inventarioRepository.ajustarConMovimiento(idVariante, cantidad, ctx);
+
+export const historialPorVariante = async (idVariante: number | string) => {
+  const existe = await productoVarianteRepository.existePorId(idVariante);
+  if (!existe) {
+    throw new AppError('Variante no encontrada', 404);
+  }
+  return inventarioRepository.findHistorialPorVariante(Number(idVariante));
+};

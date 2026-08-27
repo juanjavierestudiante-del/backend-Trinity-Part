@@ -1,11 +1,18 @@
 import { Router } from 'express';
 import * as inventarioController from '../../controllers/inventario.controller.js';
+import { validate } from '../../middlewares/validate.middleware.js';
+import {
+  actualizarInventarioSchema,
+  ajustarInventarioSchema,
+} from '../../validations/inventario.validation.js';
 
 const router = Router();
 
+router.get('/', inventarioController.listarTodo);
 router.get('/alertas', inventarioController.alertasBajoStock);
+router.get('/:idVariante/historial', inventarioController.historial);
 router.get('/:idVariante', inventarioController.obtenerPorVariante);
-router.put('/:idVariante', inventarioController.actualizarStock);
-router.patch('/:idVariante/ajustar', inventarioController.ajustarStock);
+router.put('/:idVariante', validate(actualizarInventarioSchema), inventarioController.actualizarStock);
+router.patch('/:idVariante/ajustar', validate(ajustarInventarioSchema), inventarioController.ajustarStock);
 
 export default router;

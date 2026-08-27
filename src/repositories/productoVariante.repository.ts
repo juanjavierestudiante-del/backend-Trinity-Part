@@ -29,8 +29,24 @@ export const findBySku = (sku: string) => {
   return prisma.productoVariante.findUnique({ where: { sku } });
 };
 
+export const existePorId = async (idVariante: number | string) => {
+  const count = await prisma.productoVariante.count({ where: { idVariante: Number(idVariante) } });
+  return count > 0;
+};
+
+// Crea la variante junto con su registro de inventario (stockActual: 0) en una
+// sola transacción, para que ninguna variante exista sin inventario.
 export const create = (data: Prisma.ProductoVarianteCreateInput) => {
-  return prisma.productoVariante.create({ data, include: includeCompleto });
+  return prisma.$transaction(async (tx) => {
+    const variante = await tx.productoVariante.create({ data });
+    await tx.inventario.create({
+      data: { idVariante: variante.idVariante, stockActual: 0, stockMinimo: 0 },
+    });
+    return tx.productoVariante.findUnique({
+      where: { idVariante: variante.idVariante },
+      include: includeCompleto,
+    });
+  });
 };
 
 export const update = (idVariante: number | string, data: Prisma.ProductoVarianteUpdateInput) => {

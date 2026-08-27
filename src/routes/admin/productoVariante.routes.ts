@@ -1,6 +1,5 @@
 import { Router } from 'express';
 import type { Request, Response } from 'express';
-import prisma from '../../config/prisma.js';
 import { asyncHandler } from '../../utils/helpers.js';
 import { validate } from '../../middlewares/validate.middleware.js';
 import { crearVarianteSchema, actualizarVarianteSchema } from '../../validations/productoVariante.validation.js';
@@ -23,17 +22,13 @@ router.get('/:id', asyncHandler(async (req: Request, res: Response) => {
 }));
 
 router.post('/', validate(crearVarianteSchema), asyncHandler(async (req: Request, res: Response) => {
-  // Al crear la variante, también creamos su registro de inventario en 0
+  // El repository crea la variante + su inventario inicial en la misma transacción
   const { idProducto, idMarca, idUnidad, ...resto } = req.body;
-  const variante = await prisma.productoVariante.create({
-    data: {
-      ...resto,
-      producto: { connect: { idProducto } },
-      ...(idMarca ? { marca: { connect: { idMarca } } } : {}),
-      ...(idUnidad ? { unidad: { connect: { idUnidad } } } : {}),
-      inventario: { create: { stockActual: 0, stockMinimo: 0 } },
-    },
-    include: { inventario: true },
+  const variante = await varianteRepository.create({
+    ...resto,
+    producto: { connect: { idProducto } },
+    ...(idMarca ? { marca: { connect: { idMarca } } } : {}),
+    ...(idUnidad ? { unidad: { connect: { idUnidad } } } : {}),
   });
   res.status(201).json(variante);
 }));

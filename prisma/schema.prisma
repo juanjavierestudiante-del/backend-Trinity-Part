@@ -23,6 +23,8 @@ model Usuario {
   estado       EstadoGenerico @default(Activo)
   fechaRegistro DateTime @default(now()) @map("fecha_registro")
 
+  movimientosInventario MovimientoInventario[]
+
   @@map("usuario")
 }
 
@@ -190,6 +192,7 @@ model ProductoVariante {
   inventario         Inventario?
   varianteAtributo   VarianteAtributo[]
   varianteProveedor  VarianteProveedor[]
+  movimientosInventario MovimientoInventario[]
 
   @@map("producto_variante")
 }
@@ -223,6 +226,33 @@ model Inventario {
   variante     ProductoVariante @relation(fields: [idVariante], references: [idVariante], onDelete: Cascade)
 
   @@map("inventario")
+}
+
+// ============================================
+// MOVIMIENTO_INVENTARIO (historial de movimientos de stock)
+// ============================================
+enum TipoMovimiento {
+  Entrada
+  Salida
+  Ajuste
+}
+
+model MovimientoInventario {
+  idMovimiento  Int             @id @default(autoincrement()) @map("id_movimiento")
+  idVariante    Int             @map("id_variante")
+  tipo          TipoMovimiento
+  cantidad      Int
+  stockAnterior Int             @map("stock_anterior")
+  stockNuevo    Int             @map("stock_nuevo")
+  motivo        String?         @db.VarChar(255)
+  idUsuario     Int?            @map("id_usuario")
+  fecha         DateTime        @default(now())
+
+  variante      ProductoVariante @relation(fields: [idVariante], references: [idVariante], onDelete: Cascade)
+  usuario       Usuario?         @relation(fields: [idUsuario], references: [id_usuario])
+
+  @@index([idVariante, fecha])
+  @@map("movimiento_inventario")
 }
 
 // ============================================

@@ -4,6 +4,7 @@ import { asyncHandler } from '../../utils/helpers.js';
 import { validate } from '../../middlewares/validate.middleware.js';
 import { crearVarianteSchema, actualizarVarianteSchema } from '../../validations/productoVariante.validation.js';
 import * as varianteRepository from '../../repositories/productoVariante.repository.js';
+import { requireRole } from '../../middlewares/auth.middleware.js';
 
 const router = Router();
 
@@ -21,7 +22,7 @@ router.get('/:id', asyncHandler(async (req: Request, res: Response) => {
   res.json(variante);
 }));
 
-router.post('/', validate(crearVarianteSchema), asyncHandler(async (req: Request, res: Response) => {
+router.post('/', requireRole('ADMIN'), validate(crearVarianteSchema), asyncHandler(async (req: Request, res: Response) => {
   // El repository crea la variante + su inventario inicial en la misma transacción
   const { idProducto, idMarca, idUnidad, ...resto } = req.body;
   const variante = await varianteRepository.create({
@@ -33,12 +34,12 @@ router.post('/', validate(crearVarianteSchema), asyncHandler(async (req: Request
   res.status(201).json(variante);
 }));
 
-router.put('/:id', validate(actualizarVarianteSchema), asyncHandler(async (req: Request, res: Response) => {
+router.put('/:id', requireRole('ADMIN'), validate(actualizarVarianteSchema), asyncHandler(async (req: Request, res: Response) => {
   const variante = await varianteRepository.update(req.params.id, req.body);
   res.json(variante);
 }));
 
-router.delete('/:id', asyncHandler(async (req: Request, res: Response) => {
+router.delete('/:id', requireRole('ADMIN'), asyncHandler(async (req: Request, res: Response) => {
   await varianteRepository.remove(req.params.id);
   res.status(204).send();
 }));

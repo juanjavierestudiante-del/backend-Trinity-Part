@@ -24,6 +24,8 @@ model Usuario {
   fechaRegistro DateTime @default(now()) @map("fecha_registro")
 
   movimientosInventario MovimientoInventario[]
+  carrito               Carrito?
+  pedidos               Pedido[]
 
   @@map("usuario")
 }
@@ -31,6 +33,7 @@ model Usuario {
 enum RolUsuario {
   ADMIN
   EMPLEADO
+  CLIENTE
 }
 
 enum EstadoGenerico {
@@ -193,6 +196,8 @@ model ProductoVariante {
   varianteAtributo   VarianteAtributo[]
   varianteProveedor  VarianteProveedor[]
   movimientosInventario MovimientoInventario[]
+  carritoItems          CarritoDetalle[]
+  pedidoItems           PedidoDetalle[]
 
   @@map("producto_variante")
 }
@@ -282,4 +287,61 @@ model VarianteProveedor {
 
   @@id([idVariante, idProveedor])
   @@map("variante_proveedor")
+}
+
+// ============================================
+// CARRITO
+// ============================================
+model Carrito {
+  idCarrito     Int      @id @default(autoincrement()) @map("id_carrito")
+  idUsuario     Int      @unique @map("id_usuario")
+  fechaCreacion DateTime @default(now()) @map("fecha_creacion")
+
+  usuario Usuario         @relation(fields: [idUsuario], references: [id_usuario])
+  items   CarritoDetalle[]
+
+  @@map("carrito")
+}
+
+model CarritoDetalle {
+  idDetalle  Int @id @default(autoincrement()) @map("id_detalle")
+  idCarrito  Int @map("id_carrito")
+  idVariante Int @map("id_variante")
+  cantidad   Int @default(1)
+
+  carrito  Carrito          @relation(fields: [idCarrito], references: [idCarrito], onDelete: Cascade)
+  variante ProductoVariante @relation(fields: [idVariante], references: [idVariante])
+
+  @@unique([idCarrito, idVariante])
+  @@map("carrito_detalle")
+}
+
+// ============================================
+// PEDIDO
+// ============================================
+model Pedido {
+  idPedido      Int      @id @default(autoincrement()) @map("id_pedido")
+  idUsuario     Int      @map("id_usuario")
+  estado        String   @default("pendiente") @db.VarChar(50)
+  total         Decimal  @db.Decimal(10, 2)
+  fechaCreacion DateTime @default(now()) @map("fecha_creacion")
+
+  usuario Usuario         @relation(fields: [idUsuario], references: [id_usuario])
+  items   PedidoDetalle[]
+
+  @@index([idUsuario, fechaCreacion])
+  @@map("pedido")
+}
+
+model PedidoDetalle {
+  idDetalle      Int     @id @default(autoincrement()) @map("id_detalle")
+  idPedido       Int     @map("id_pedido")
+  idVariante     Int     @map("id_variante")
+  cantidad       Int
+  precioUnitario Decimal @map("precio_unitario") @db.Decimal(10, 2)
+
+  pedido   Pedido          @relation(fields: [idPedido], references: [idPedido], onDelete: Cascade)
+  variante ProductoVariante @relation(fields: [idVariante], references: [idVariante])
+
+  @@map("pedido_detalle")
 }

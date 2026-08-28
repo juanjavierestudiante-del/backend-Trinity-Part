@@ -4,6 +4,7 @@ import categoriaRoutes from './categoria.routes.js';
 import inventarioRoutes from './inventario.routes.js';
 import productoVarianteRoutes from './productoVariante.routes.js';
 import imagenRoutes from './imagen.routes.js';
+import { requireRole } from '../../middlewares/auth.middleware.js';
 
 const router = Router();
 
@@ -44,7 +45,7 @@ router.get('/atributos', asyncHandler(async (req, res) => {
 }));
 
 // POST /api/admin/atributos — crea un atributo nuevo (ej: "Material")
-router.post('/atributos', asyncHandler(async (req, res) => {
+router.post('/atributos', requireRole('ADMIN'), asyncHandler(async (req, res) => {
   const { nombre } = req.body;
   const atributo = await prisma.atributo.create({
     data: { nombre },
@@ -54,7 +55,7 @@ router.post('/atributos', asyncHandler(async (req, res) => {
 }));
 
 // POST /api/admin/atributos/:id/valores — agrega un valor a un atributo existente
-router.post('/atributos/:id/valores', asyncHandler(async (req, res) => {
+router.post('/atributos/:id/valores', requireRole('ADMIN'), asyncHandler(async (req, res) => {
   const { valor } = req.body;
   const valorCreado = await prisma.valorAtributo.create({
     data: {
@@ -66,7 +67,7 @@ router.post('/atributos/:id/valores', asyncHandler(async (req, res) => {
 }));
 
 // POST /api/admin/variantes/:id/atributos — asigna un valor de atributo a una variante
-router.post('/variantes/:id/atributos', asyncHandler(async (req, res) => {
+router.post('/variantes/:id/atributos', requireRole('ADMIN'), asyncHandler(async (req, res) => {
   const { idValor } = req.body;
   await prisma.varianteAtributo.create({
     data: {
@@ -78,7 +79,7 @@ router.post('/variantes/:id/atributos', asyncHandler(async (req, res) => {
 }));
 
 // DELETE /api/admin/variantes/:id/atributos/:idValor — quita un atributo de una variante
-router.delete('/variantes/:id/atributos/:idValor', asyncHandler(async (req, res) => {
+router.delete('/variantes/:id/atributos/:idValor', requireRole('ADMIN'), asyncHandler(async (req, res) => {
   await prisma.varianteAtributo.delete({
     where: {
       idVariante_idValor: {

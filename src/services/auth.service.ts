@@ -1,4 +1,4 @@
-2// Lógica de negocio para autenticación del panel admin.
+// Lógica de negocio para autenticación del panel admin.
 
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
@@ -38,7 +38,17 @@ interface RegistrarInput {
   rol?: RolUsuario;
 }
 
-export const registrar = async ({ nombre, email, password, rol = 'ADMIN' }: RegistrarInput) => {
+export const registrar = async ({ nombre, email, password, rol = 'CLIENTE' }: RegistrarInput) => {
   const passwordHash = await bcrypt.hash(password, 10);
-  return usuarioRepository.create({ nombre, email, password: passwordHash, rol });
+  const usuario = await usuarioRepository.create({ nombre, email, password: passwordHash, rol });
+
+  const token = jwt.sign(
+    { id_usuario: usuario.id_usuario, email: usuario.email, rol: usuario.rol },
+    env.jwt.secret,
+    { expiresIn: env.jwt.expiresIn as any }
+  );
+
+  const { password: _omit, ...usuarioSinPassword } = usuario;
+
+  return { usuario: usuarioSinPassword, token };
 };

@@ -4,6 +4,7 @@ import categoriaRoutes from './categoria.routes.js';
 import inventarioRoutes from './inventario.routes.js';
 import productoVarianteRoutes from './productoVariante.routes.js';
 import imagenRoutes from './imagen.routes.js';
+import pedidoRoutes from './pedido.routes.js';
 import { requireRole } from '../../middlewares/auth.middleware.js';
 
 const router = Router();
@@ -13,6 +14,7 @@ router.use('/categorias', categoriaRoutes);
 router.use('/inventario', inventarioRoutes);
 router.use('/variantes', productoVarianteRoutes);
 router.use('/imagenes', imagenRoutes);
+router.use('/pedidos', pedidoRoutes);
 
 export default router;
 

@@ -138,13 +138,14 @@ model Producto {
   metaDescripcion    String?  @map("meta_descripcion") @db.VarChar(255)
   estado             EstadoProducto @default(Borrador)
   fechaRegistro      DateTime @default(now()) @map("fecha_registro")
-  fechaActualizacion DateTime @updatedAt @map("fecha_actualizacion")
+  fechaActualizacion DateTime @default(now()) @updatedAt @map("fecha_actualizacion")
   fechaPublicacion   DateTime? @map("fecha_publicacion")
 
   categoria          Categoria @relation(fields: [idCategoria], references: [idCategoria])
   imagenes           ImagenProducto[]
   variantes          ProductoVariante[]
 
+  @@index([idCategoria])
   @@map("producto")
 }
 
@@ -199,6 +200,7 @@ model ProductoVariante {
   carritoItems          CarritoDetalle[]
   pedidoItems           PedidoDetalle[]
 
+  @@index([idProducto])
   @@map("producto_variante")
 }
 
@@ -319,12 +321,22 @@ model CarritoDetalle {
 // ============================================
 // PEDIDO
 // ============================================
+enum EstadoPedido {
+  PENDIENTE
+  CONFIRMADO
+  CANCELADO
+}
+
 model Pedido {
-  idPedido      Int      @id @default(autoincrement()) @map("id_pedido")
-  idUsuario     Int      @map("id_usuario")
-  estado        String   @default("pendiente") @db.VarChar(50)
-  total         Decimal  @db.Decimal(10, 2)
-  fechaCreacion DateTime @default(now()) @map("fecha_creacion")
+  idPedido          Int          @id @default(autoincrement()) @map("id_pedido")
+  idUsuario         Int          @map("id_usuario")
+  estado            EstadoPedido @default(PENDIENTE)
+  total             Decimal      @db.Decimal(10, 2)
+  nombreContacto    String       @map("nombre_contacto") @db.VarChar(150)
+  telefonoContacto  String       @map("telefono_contacto") @db.VarChar(50)
+  direccionEntrega  String?      @map("direccion_entrega") @db.VarChar(255)
+  notas             String?      @db.Text
+  fechaCreacion     DateTime     @default(now()) @map("fecha_creacion")
 
   usuario Usuario         @relation(fields: [idUsuario], references: [id_usuario])
   items   PedidoDetalle[]

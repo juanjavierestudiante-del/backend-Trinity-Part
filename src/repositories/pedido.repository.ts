@@ -1,4 +1,4 @@
-import { Prisma } from '@prisma/client';
+import { Prisma, EstadoPedido } from '@prisma/client';
 import prisma from '../config/prisma.js';
 
 const includeDetalles = {
@@ -13,12 +13,33 @@ const includeDetalles = {
   },
 } satisfies Prisma.PedidoInclude;
 
-export const create = (idUsuario: number, total: number, items: { idVariante: number; cantidad: number; precioUnitario: number }[]) => {
+const includeAdmin = {
+  ...includeDetalles,
+  usuario: {
+    select: {
+      id_usuario: true,
+      nombre: true,
+      email: true,
+      rol: true,
+    },
+  },
+} satisfies Prisma.PedidoInclude;
+
+export const create = (
+  idUsuario: number,
+  total: number,
+  items: { idVariante: number; cantidad: number; precioUnitario: number }[],
+  contacto: { nombreContacto: string; telefonoContacto: string; direccionEntrega?: string | null; notas?: string | null }
+) => {
   return prisma.pedido.create({
     data: {
       idUsuario,
       total,
-      estado: 'pendiente',
+      estado: EstadoPedido.PENDIENTE,
+      nombreContacto: contacto.nombreContacto,
+      telefonoContacto: contacto.telefonoContacto,
+      direccionEntrega: contacto.direccionEntrega ?? null,
+      notas: contacto.notas ?? null,
       items: {
         create: items.map((item) => ({
           idVariante: item.idVariante,
@@ -36,6 +57,28 @@ export const findByUsuario = (idUsuario: number) => {
     where: { idUsuario },
     include: includeDetalles,
     orderBy: { fechaCreacion: 'desc' },
+  });
+};
+
+export const findAll = () => {
+  return prisma.pedido.findMany({
+    include: includeAdmin,
+    orderBy: { fechaCreacion: 'desc' },
+  });
+};
+
+export const findById = (idPedido: number) => {
+  return prisma.pedido.findUnique({
+    where: { idPedido },
+    include: includeAdmin,
+  });
+};
+
+export const updateEstado = (idPedido: number, estado: EstadoPedido) => {
+  return prisma.pedido.update({
+    where: { idPedido },
+    data: { estado },
+    include: includeAdmin,
   });
 };
 

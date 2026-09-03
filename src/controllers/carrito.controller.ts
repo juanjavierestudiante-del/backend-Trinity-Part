@@ -8,6 +8,12 @@ export const obtener = asyncHandler(async (req: Request, res: Response) => {
   res.json(carrito);
 });
 
+export const contar = asyncHandler(async (req: Request, res: Response) => {
+  const idUsuario = req.usuario!.id_usuario;
+  const items = await carritoService.contarItems(idUsuario);
+  res.json({ items });
+});
+
 export const agregarItem = asyncHandler(async (req: Request, res: Response) => {
   const idUsuario = req.usuario!.id_usuario;
   const item = await carritoService.agregarItem(idUsuario, req.body);

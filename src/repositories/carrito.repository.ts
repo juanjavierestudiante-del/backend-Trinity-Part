@@ -31,6 +31,16 @@ export const findOrCreateByUsuario = async (idUsuario: number) => {
   return carrito;
 };
 
+// Cuenta los items del carrito de un usuario SIN traer el carrito completo
+// (solo devuelve la suma de cantidades, sin includes pesados).
+export const contarItems = async (idUsuario: number): Promise<number> => {
+  const res = await prisma.carritoDetalle.aggregate({
+    where: { carrito: { idUsuario } },
+    _sum: { cantidad: true },
+  });
+  return res._sum.cantidad ?? 0;
+};
+
 export const findItemById = (idDetalle: number) => {
   return prisma.carritoDetalle.findUnique({ where: { idDetalle } });
 };

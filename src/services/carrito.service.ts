@@ -6,6 +6,10 @@ export const obtenerCarrito = async (idUsuario: number) => {
   return carritoRepository.findOrCreateByUsuario(idUsuario);
 };
 
+export const contarItems = async (idUsuario: number) => {
+  return carritoRepository.contarItems(idUsuario);
+};
+
 export const agregarItem = async (idUsuario: number, input: AgregarItemInput) => {
   const carrito = await carritoRepository.findOrCreateByUsuario(idUsuario);
   return carritoRepository.upsertItem(carrito.idCarrito, input.idVariante, input.cantidad);

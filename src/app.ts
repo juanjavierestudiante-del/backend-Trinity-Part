@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import compression from 'compression';
 import morgan from 'morgan';
 import routes from './routes/index.js';
 import { errorMiddleware, notFoundMiddleware } from './middlewares/error.middleware.js';
@@ -8,6 +9,7 @@ import { env } from './config/env.js';
 const app = express();
 
 app.use(cors());
+app.use(compression());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 

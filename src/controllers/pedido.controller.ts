@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express';
 import * as pedidoService from '../services/pedido.service.js';
-import { asyncHandler, AppError } from '../utils/helpers.js';
+import { asyncHandler, AppError, parsePaginacion } from '../utils/helpers.js';
 
 export const crear = asyncHandler(async (req: Request, res: Response) => {
   const idUsuario = req.usuario!.id_usuario;
@@ -14,9 +14,10 @@ export const listar = asyncHandler(async (req: Request, res: Response) => {
   res.json(pedidos);
 });
 
-export const listarAdmin = asyncHandler(async (_req: Request, res: Response) => {
-  const pedidos = await pedidoService.listarTodos();
-  res.json(pedidos);
+export const listarAdmin = asyncHandler(async (req: Request, res: Response) => {
+  const { page, limit } = parsePaginacion(req.query);
+  const { items, total } = await pedidoService.listarTodos(page, limit);
+  res.json({ items, total, page, limit, totalPages: Math.ceil(total / limit) });
 });
 
 export const cambiarEstadoAdmin = asyncHandler(async (req: Request, res: Response) => {

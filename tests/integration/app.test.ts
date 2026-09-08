@@ -11,9 +11,12 @@ describe('Health check', () => {
 });
 
 describe('Catálogo público', () => {
-  it('GET /api/productos responde un array', async () => {
+  it('GET /api/productos responde un envelope paginado', async () => {
     const res = await request(app).get('/api/productos');
     expect(res.status).toBe(200);
-    expect(Array.isArray(res.body)).toBe(true);
+    expect(Array.isArray(res.body.items)).toBe(true);
+    expect(typeof res.body.total).toBe('number');
+    expect(typeof res.body.page).toBe('number');
+    expect(typeof res.body.totalPages).toBe('number');
   });
 });

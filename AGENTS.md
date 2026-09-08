@@ -2,7 +2,9 @@
 
 ## Propósito
 
-API REST para tienda Trinity Party. Sirve panel de administración (CRUD productos, categorías, inventario) y catálogo público.
+API REST para tienda Trinity Party. Sirve panel de administración (CRUD productos, categorías, inventario) y catálogo público, registro, carrito y pedidos.
+
+Revisado el 2026-09-07 contra código local; consultar `../docs/api.md` para contratos.
 
 ## Stack
 
@@ -28,8 +30,10 @@ src/
 ├── middlewares/        # auth, error handling, Zod validation
 ├── repositories/      # Queries Prisma puras
 ├── routes/            # Definición de endpoints
-│   ├── index.ts       # Montaje: /auth, /admin (con auth), / (público)
+│   ├── index.ts       # Montaje: /auth, /admin, /carrito, /pedidos y catálogo
 │   ├── auth.routes.ts
+│   ├── carrito.routes.ts
+│   ├── pedido.routes.ts
 │   ├── admin/         # Rutas protegidas (todas requieren JWT)
 │   └── public/        # Rutas públicas (catálogo)
 ├── services/          # Lógica de negocio
@@ -51,7 +55,7 @@ Validations  (Zod)     (AppError)
 - **Services:** Contienen lógica de negocio, llaman repositories.
 - **Repositories:** Contienen queries Prisma puras (sin lógica HTTP).
 
-**Excepción:** Algunos endpoints en `routes/admin/index.ts` usan Prisma directamente sin service/repository (marcas, unidades, atributos). Esto es deuda técnica.
+**Excepciones:** auxiliares/atributos usan Prisma en routes; variantes llama al repositorio desde handlers inline; imágenes usa Prisma/Cloudinary en controller; categoría combina servicio y Cloudinary en controller; checkout usa Prisma directamente desde pedido.service. Inventario contiene lógica transaccional y de stock en repository. No todos los dominios recorren las cinco capas.
 
 ## Variables de entorno requeridas
 
@@ -73,8 +77,11 @@ La app falla al iniciar si falta alguna de las requeridas (`DATABASE_URL`, `JWT_
 - **Login:** `POST /api/auth/login` → JWT con payload `{ id_usuario, email, rol }`.
 - **Protección:** `authMiddleware` verifica `Authorization: Bearer <token>`.
 - **Rutas admin:** Todas bajo `/api/admin/*` requieren JWT.
-- **Roles:** `RolUsuario` enum (ADMIN, EMPLEADO) existe en schema pero `requireRole()` no se usa actualmente.
-- **Seed:** Crea usuario `admin@trinityparty.com / admin123`.
+- **Roles:** ADMIN, EMPLEADO, CLIENTE. Escrituras admin y GET pedidos admin usan `requireRole('ADMIN')`; otros GET admin solo exigen JWT.
+- **Registro:** `/api/auth/register` crea CLIENTE; el default Prisma Usuario sigue siendo ADMIN.
+- **Estado:** middleware consulta usuario activo; usa el rol del JWT para autorización. Login no verifica estado antes de firmar.
+- **Perfil:** retorna `{ usuario: req.usuario }` (payload JWT), no registro completo.
+- **Seed:** `prisma/seed.ts` existe y está declarado en package.json; no reproducir credenciales.
 
 ## Imágenes (Cloudinary)
 
@@ -91,10 +98,14 @@ Archivos en `src/validations/`:
 
 | Archivo | Schemas |
 |---------|---------|
-| `auth.validation.ts` | `loginSchema` |
+| `auth.validation.ts` | `loginSchema`, `registerSchema` |
+| `carrito.validation.ts` | `agregarItemSchema`, `actualizarItemSchema` |
+| `pedido.validation.ts` | `crearPedidoSchema`, `actualizarEstadoPedidoSchema` |
 | `producto.validation.ts` | `crearProductoSchema`, `actualizarProductoSchema` |
 | `productoVariante.validation.ts` | `crearVarianteSchema`, `actualizarVarianteSchema` |
 | `inventario.validation.ts` | `actualizarInventarioSchema`, `ajustarInventarioSchema` |
+
+Categorías y atributos no montan Zod actualmente.
 
 Middleware `validate(schema)` reemplaza `req.body` con datos parseados o retorna 400 con detalles.
 
@@ -127,21 +138,22 @@ npm run prisma:migrate   # prisma migrate dev
 npm run prisma:generate  # prisma generate
 npm run prisma:studio    # Prisma Studio
 npm run test             # vitest run
-npm run seed             # tsx prisma/seed.ts (ARCHIVO NO EXISTE)
+npm run seed             # tsx prisma/seed.ts
 ```
 
 ## Restricciones
 
 1. No usar Prisma directamente en routes para nuevos endpoints — crear service y repository.
 2. No exponer el password hash en respuestas JWT.
-3. El catá público siempre filtra `estado=Activo` — no exponer borradores.
+3. Mantener el filtro Activo del listado público. El detalle por slug aún no lo aplica: pendiente documentado, no una protección implementada.
 4. Imágenes: siempre subir vía Cloudinary, nunca almacenamiento local.
 5. Slugs se generan automáticamente con `generarSlug()` (quita tildes, lowercase, espacios → guiones).
 
 ## Inconsistencias conocidas
 
 - `routes/admin/index.ts` tiene endpoints inline sin service/repository (marcas, unidades, atributos).
-- `requireRole()` existe en `auth.middleware.ts` pero no se usa.
-- Archivo seed referenciado en package.json pero no existe en el repositorio.
+- Ocho migraciones locales; estado de aplicación externo UNKNOWN.
+- Carrito y pedidos implementados; cancelar pedido no repone stock.
+- Catálogo público, inventario y pedidos admin paginados; productos admin devuelve array.
 - Sin Dockerfile para el backend.
-- Console.log de debug en `producto.service.ts:38` (`console.log(producto?.rating)`).
+- Console.log de debug en `producto.service.ts` (`console.log(producto?.rating)`).

@@ -2,17 +2,40 @@
 
 import type { Request, Response } from 'express';
 import * as productoService from '../services/producto.service.js';
-import { asyncHandler } from '../utils/helpers.js';
+import { asyncHandler, parsePaginacion } from '../utils/helpers.js';
 
 export const listar = asyncHandler(async (req: Request, res: Response) => {
   // Antes: const { estado } = req.query;
   // Ahora: también leemos "categoria" y "q" de la URL
   const { estado, categoria, q } = req.query;
+  const { page, limit } = parsePaginacion(req.query);
 
-  const productos = await productoService.listar({
+  const { items, total } = await productoService.listar(
+    {
+      estado: estado as string | undefined,
+      categoria: categoria as string | undefined, // NUEVO
+      q: q as string | undefined,                   // NUEVO
+    },
+    { page, limit }
+  );
+
+  res.json({
+    items,
+    total,
+    page,
+    limit,
+    totalPages: Math.ceil(total / limit),
+  });
+});
+
+// Listado admin sin paginar (mantiene el shape de array de siempre).
+export const listarTodos = asyncHandler(async (req: Request, res: Response) => {
+  const { estado, categoria, q } = req.query;
+
+  const productos = await productoService.listarTodos({
     estado: estado as string | undefined,
-    categoria: categoria as string | undefined, // NUEVO
-    q: q as string | undefined,                   // NUEVO
+    categoria: categoria as string | undefined,
+    q: q as string | undefined,
   });
 
   res.json(productos);

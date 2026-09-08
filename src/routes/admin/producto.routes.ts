@@ -6,7 +6,7 @@ import { requireRole } from '../../middlewares/auth.middleware.js';
 
 const router = Router();
 
-router.get('/', productoController.listar);
+router.get('/', productoController.listarTodos);
 router.get('/:id', productoController.obtenerPorId);
 router.post('/', requireRole('ADMIN'), validate(crearProductoSchema), productoController.crear);
 router.put('/:id', requireRole('ADMIN'), validate(actualizarProductoSchema), productoController.actualizar);

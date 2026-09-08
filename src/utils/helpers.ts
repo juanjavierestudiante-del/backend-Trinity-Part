@@ -33,3 +33,15 @@ export class AppError extends Error {
     this.statusCode = statusCode;
   }
 }
+
+export interface Paginacion {
+  page: number;
+  limit: number;
+}
+
+// Lee page/limit de la querystring con defaults y límites razonables.
+export const parsePaginacion = (query: Record<string, unknown>): Paginacion => {
+  const page = Math.max(1, Number(query.page) || 1);
+  const limit = Math.min(100, Math.max(1, Number(query.limit) || 20));
+  return { page, limit };
+};

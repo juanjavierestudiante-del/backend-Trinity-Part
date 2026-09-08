@@ -17,30 +17,54 @@ const includeCompleto = {
   },
 } satisfies Prisma.ProductoInclude;
 
-export const findAll = ({
-  estado,
-  idsCategorias,
-  busqueda,
-}: {
+interface FiltrosFindAll {
   estado?: EstadoProducto;
   idsCategorias?: number[];
   busqueda?: string;
-}) => {
-  const where: Prisma.ProductoWhereInput = {
-    ...(estado ? { estado } : {}),
+}
 
-    // 🔥 NUEVO: ahora filtramos por IDs, no por slug
-    ...(idsCategorias?.length
-      ? { idCategoria: { in: idsCategorias } }
-      : {}),
+const buildWhere = ({
+  estado,
+  idsCategorias,
+  busqueda,
+}: FiltrosFindAll): Prisma.ProductoWhereInput => ({
+  ...(estado ? { estado } : {}),
 
-    ...(busqueda
-      ? { nombre: { contains: busqueda, mode: 'insensitive' } }
-      : {}),
-  };
+  // 🔥 NUEVO: ahora filtramos por IDs, no por slug
+  ...(idsCategorias?.length
+    ? { idCategoria: { in: idsCategorias } }
+    : {}),
 
+  ...(busqueda
+    ? { nombre: { contains: busqueda, mode: 'insensitive' } }
+    : {}),
+});
+
+export const findAll = async (
+  filtros: FiltrosFindAll,
+  page = 1,
+  limit = 20
+) => {
+  const where = buildWhere(filtros);
+
+  const [items, total] = await prisma.$transaction([
+    prisma.producto.findMany({
+      where,
+      include: includeCompleto,
+      orderBy: { fechaRegistro: 'desc' },
+      skip: (page - 1) * limit,
+      take: limit,
+    }),
+    prisma.producto.count({ where }),
+  ]);
+
+  return { items, total };
+};
+
+// Variante sin paginar para el listado admin (mantiene el shape de array).
+export const findAllSinPaginacion = (filtros: FiltrosFindAll) => {
   return prisma.producto.findMany({
-    where,
+    where: buildWhere(filtros),
     include: includeCompleto,
     orderBy: { fechaRegistro: 'desc' },
   });

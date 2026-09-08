@@ -122,8 +122,8 @@ export const listarPorUsuario = async (idUsuario: number) => {
   return pedidoRepository.findByUsuario(idUsuario);
 };
 
-export const listarTodos = async () => {
-  return pedidoRepository.findAll();
+export const listarTodos = async (page = 1, limit = 20) => {
+  return pedidoRepository.findAll(page, limit);
 };
 
 export const cambiarEstado = async (idPedido: number, estado: EstadoPedido) => {

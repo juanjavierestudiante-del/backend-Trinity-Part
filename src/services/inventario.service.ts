@@ -10,7 +10,8 @@ interface ContextoUsuario {
   motivo?: string | null;
 }
 
-export const listar = () => inventarioRepository.findTodos();
+export const listar = (page = 1, limit = 20) =>
+  inventarioRepository.findTodos(page, limit);
 
 export const listarAlertas = () => inventarioRepository.findBajoStock();
 

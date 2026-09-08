@@ -137,18 +137,26 @@ export interface FilaInventario {
 }
 
 // Listado global: todas las variantes con su inventario (sin registro → stocks en 0).
-export const findTodos = async (): Promise<FilaInventario[]> => {
-  const variantes = await prisma.productoVariante.findMany({
-    orderBy: [{ producto: { nombre: 'asc' } }, { sku: 'asc' }],
-    include: {
-      producto: { select: { nombre: true } },
-      marca: { select: { nombre: true } },
-      unidad: { select: { abreviatura: true } },
-      inventario: true,
-    },
-  });
+export const findTodos = async (
+  page = 1,
+  limit = 20
+): Promise<{ items: FilaInventario[]; total: number }> => {
+  const [variantes, total] = await prisma.$transaction([
+    prisma.productoVariante.findMany({
+      orderBy: [{ producto: { nombre: 'asc' } }, { sku: 'asc' }],
+      include: {
+        producto: { select: { nombre: true } },
+        marca: { select: { nombre: true } },
+        unidad: { select: { abreviatura: true } },
+        inventario: true,
+      },
+      skip: (page - 1) * limit,
+      take: limit,
+    }),
+    prisma.productoVariante.count(),
+  ]);
 
-  return variantes.map((v) => ({
+  const items = variantes.map((v) => ({
     idProducto: v.idProducto,
     producto: v.producto.nombre,
     idVariante: v.idVariante,
@@ -161,6 +169,8 @@ export const findTodos = async (): Promise<FilaInventario[]> => {
     stockMaximo: v.inventario?.stockMaximo ?? null,
     tieneRegistro: !!v.inventario,
   }));
+
+  return { items, total };
 };
 
 export interface FilaBajoStock {

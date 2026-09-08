@@ -60,11 +60,18 @@ export const findByUsuario = (idUsuario: number) => {
   });
 };
 
-export const findAll = () => {
-  return prisma.pedido.findMany({
-    include: includeAdmin,
-    orderBy: { fechaCreacion: 'desc' },
-  });
+export const findAll = async (page = 1, limit = 20) => {
+  const [items, total] = await prisma.$transaction([
+    prisma.pedido.findMany({
+      include: includeAdmin,
+      orderBy: { fechaCreacion: 'desc' },
+      skip: (page - 1) * limit,
+      take: limit,
+    }),
+    prisma.pedido.count(),
+  ]);
+
+  return { items, total };
 };
 
 export const findById = (idPedido: number) => {

@@ -2,7 +2,7 @@
 
 import type { Request, Response } from 'express';
 import * as inventarioService from '../services/inventario.service.js';
-import { asyncHandler } from '../utils/helpers.js';
+import { asyncHandler, parsePaginacion } from '../utils/helpers.js';
 
 // Extrae el usuario autenticado (authMiddleware) y el motivo del body.
 const contextoDesdeRequest = (req: Request) => ({
@@ -11,8 +11,9 @@ const contextoDesdeRequest = (req: Request) => ({
 });
 
 export const listarTodo = asyncHandler(async (req: Request, res: Response) => {
-  const inventarios = await inventarioService.listar();
-  res.json(inventarios);
+  const { page, limit } = parsePaginacion(req.query);
+  const { items, total } = await inventarioService.listar(page, limit);
+  res.json({ items, total, page, limit, totalPages: Math.ceil(total / limit) });
 });
 
 export const alertasBajoStock = asyncHandler(async (req: Request, res: Response) => {

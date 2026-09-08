@@ -3,7 +3,7 @@
 import { Prisma, EstadoProducto } from '@prisma/client';
 import * as productoRepository from '../repositories/producto.repository.js';
 import * as categoriaRepository from '../repositories/categoria.repository.js';
-import { generarSlug, AppError } from '../utils/helpers.js';
+import { generarSlug, AppError, type Paginacion } from '../utils/helpers.js';
 import type { CrearProductoInput, ActualizarProductoInput } from '../validations/producto.validation.js';
 //filtro por busqueda categiria y estado priemro hcamos un interdaz
 interface FiltrosProducto {
@@ -12,17 +12,35 @@ interface FiltrosProducto {
   q?: string;
 }
 
-export const listar = async (filtros: FiltrosProducto) => {
-  let idsCategorias: number[] | undefined;
+const resolverIdsCategorias = async (categoria?: string) => {
+  if (!categoria) return undefined;
 
   // 🔥 Si viene categoría, resolvemos TODO el árbol
-  if (filtros.categoria) {
-    idsCategorias = await categoriaRepository.getIdsDescendientes(
-      filtros.categoria
-    );
-  }
+  return categoriaRepository.getIdsDescendientes(categoria);
+};
 
-  return productoRepository.findAll({
+export const listar = async (
+  filtros: FiltrosProducto,
+  paginacion: Paginacion = { page: 1, limit: 20 }
+) => {
+  const idsCategorias = await resolverIdsCategorias(filtros.categoria);
+
+  return productoRepository.findAll(
+    {
+      estado: filtros.estado as EstadoProducto | undefined,
+      idsCategorias,
+      busqueda: filtros.q,
+    },
+    paginacion.page,
+    paginacion.limit
+  );
+};
+
+// Listado admin sin paginar (mismo filtrado, shape de array).
+export const listarTodos = async (filtros: FiltrosProducto) => {
+  const idsCategorias = await resolverIdsCategorias(filtros.categoria);
+
+  return productoRepository.findAllSinPaginacion({
     estado: filtros.estado as EstadoProducto | undefined,
     idsCategorias,
     busqueda: filtros.q,

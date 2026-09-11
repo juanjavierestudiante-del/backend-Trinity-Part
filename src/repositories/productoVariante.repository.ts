@@ -2,6 +2,7 @@
 
 import { Prisma } from '@prisma/client';
 import prisma from '../config/prisma.js';
+import { AppError } from '../utils/helpers.js';
 
 const includeCompleto = {
   marca: true,
@@ -49,12 +50,58 @@ export const create = (data: Prisma.ProductoVarianteCreateInput) => {
   });
 };
 
-export const update = (idVariante: number | string, data: Prisma.ProductoVarianteUpdateInput) => {
+export const update = async (idVariante: number | string, data: Prisma.ProductoVarianteUpdateInput) => {
+  if (data.estado === 'Activo') {
+    await validarCombinacionActivaUnica(idVariante, undefined, true);
+  }
   return prisma.productoVariante.update({
     where: { idVariante: Number(idVariante) },
     data,
     include: includeCompleto,
   });
+};
+
+const mismaCombinacion = (actual: number[], otra: number[]) =>
+  actual.length === otra.length && actual.every((idValor, indice) => idValor === otra[indice]);
+
+export const validarCombinacionActivaUnica = async (
+  idVariante: number | string,
+  idValorAdicional?: number,
+  considerarComoActiva = false
+) => {
+  const variante = await prisma.productoVariante.findUnique({
+    where: { idVariante: Number(idVariante) },
+    include: { varianteAtributo: { select: { idValor: true } } },
+  });
+
+  if (!variante || (variante.estado !== 'Activo' && !considerarComoActiva)) return;
+
+  const valores = [...new Set([
+    ...variante.varianteAtributo.map((atributo) => atributo.idValor),
+    ...(idValorAdicional === undefined ? [] : [idValorAdicional]),
+  ])].sort((a, b) => a - b);
+
+  if (valores.length === 0) return;
+
+  const variantesActivas = await prisma.productoVariante.findMany({
+    where: {
+      idProducto: variante.idProducto,
+      estado: 'Activo',
+      idVariante: { not: variante.idVariante },
+    },
+    include: { varianteAtributo: { select: { idValor: true } } },
+  });
+
+  const duplicada = variantesActivas.some((candidata) => {
+    const valoresCandidata = candidata.varianteAtributo
+      .map((atributo) => atributo.idValor)
+      .sort((a, b) => a - b);
+    return mismaCombinacion(valores, valoresCandidata);
+  });
+
+  if (duplicada) {
+    throw new AppError('Ya existe una variante activa con la misma combinación de valores de atributos', 409);
+  }
 };
 
 export const remove = (idVariante: number | string) => {

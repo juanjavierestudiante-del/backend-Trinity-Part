@@ -5,6 +5,13 @@ import prisma from '../config/prisma.js';
 
 const includeCompleto = {
   categoria: true,
+  atributoPrincipal: {
+    select: {
+      idAtributo: true,
+      nombre: true,
+      tipoVisualizacion: true,
+    },
+  },
   imagenes: { orderBy: { ordenImagen: 'asc' } },
   variantes: {
     include: {
@@ -87,6 +94,36 @@ export const findBySlug = (slug: string) => {
 export const create = (data: Prisma.ProductoCreateInput) => {
   return prisma.producto.create({ data, include: includeCompleto });
 };
+
+export const atributoExiste = (idAtributo: number) =>
+  prisma.atributo.findUnique({
+    where: { idAtributo },
+    select: { idAtributo: true, nombre: true, tipoVisualizacion: true },
+  });
+
+export const productoUsaAtributo = (idProducto: number | string, idAtributo: number) =>
+  prisma.productoVariante.count({
+    where: {
+      idProducto: Number(idProducto),
+      varianteAtributo: {
+        some: { valorAtributo: { idAtributo } },
+      },
+    },
+  });
+
+export const atributosUsadosPorProducto = (idProducto: number | string) =>
+  prisma.atributo.findMany({
+    where: {
+      valores: {
+        some: {
+          varianteAtributo: {
+            some: { variante: { idProducto: Number(idProducto) } },
+          },
+        },
+      },
+    },
+    select: { idAtributo: true, nombre: true, tipoVisualizacion: true },
+  });
 
 export const update = (idProducto: number | string, data: Prisma.ProductoUpdateInput) => {
   return prisma.producto.update({

@@ -4,6 +4,7 @@ import { Prisma, EstadoProducto } from '@prisma/client';
 import * as productoRepository from '../repositories/producto.repository.js';
 import * as categoriaRepository from '../repositories/categoria.repository.js';
 import { generarSlug, AppError, type Paginacion } from '../utils/helpers.js';
+import { esAtributoColor } from '../utils/atributo.helpers.js';
 import type { CrearProductoInput, ActualizarProductoInput } from '../validations/producto.validation.js';
 //filtro por busqueda categiria y estado priemro hcamos un interdaz
 interface FiltrosProducto {
@@ -68,7 +69,11 @@ export const obtenerPorSlug = async (slug: string) => {
 export const crear = (datos: CrearProductoInput) => {
   const slug = generarSlug(datos.nombre);
 
-  const { idCategoria, ...resto } = datos;
+  const { idCategoria, idAtributoPrincipal, ...resto } = datos;
+
+  if (idAtributoPrincipal != null) {
+    throw new AppError('El atributo principal solo puede asignarse cuando el producto ya usa ese atributo en una variante', 400);
+  }
 
   return productoRepository.create({
     ...resto,
@@ -82,7 +87,7 @@ export const crear = (datos: CrearProductoInput) => {
 };
 
 export const actualizar = async (idProducto: number | string, datos: ActualizarProductoInput) => {
-  await obtenerPorId(idProducto);
+  const producto = await obtenerPorId(idProducto);
   const data: Record<string, unknown> = { ...datos };
   if (datos.nombre) {
     data.slug = generarSlug(datos.nombre);
@@ -91,7 +96,29 @@ export const actualizar = async (idProducto: number | string, datos: ActualizarP
     data.categoria = { connect: { idCategoria: datos.idCategoria } };
     delete data.idCategoria;
   }
+
+  if (Object.prototype.hasOwnProperty.call(datos, 'idAtributoPrincipal')) {
+    delete data.idAtributoPrincipal;
+    if (datos.idAtributoPrincipal === null) {
+      data.atributoPrincipal = { disconnect: true };
+    } else if (datos.idAtributoPrincipal !== undefined) {
+      const atributo = await productoRepository.atributoExiste(datos.idAtributoPrincipal);
+      if (!atributo) {
+        throw new AppError('El atributo principal indicado no existe', 400);
+      }
+      const usos = await productoRepository.productoUsaAtributo(producto.idProducto, atributo.idAtributo);
+      if (usos === 0) {
+        throw new AppError('El atributo principal debe estar asignado a al menos una variante del producto', 400);
+      }
+      data.atributoPrincipal = { connect: { idAtributo: atributo.idAtributo } };
+    }
+  }
   return productoRepository.update(idProducto, data as Prisma.ProductoUpdateInput);
+};
+
+export const sugerirAtributoPrincipalColor = async (idProducto: number | string) => {
+  const atributos = await productoRepository.atributosUsadosPorProducto(idProducto);
+  return atributos.find((atributo) => esAtributoColor(atributo.nombre)) ?? null;
 };
 
 export const eliminar = async (idProducto: number | string) => {

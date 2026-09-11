@@ -5,6 +5,7 @@ import { z } from 'zod';
 
 export const crearProductoSchema = z.object({
   idCategoria: z.number().int().positive(),
+  idAtributoPrincipal: z.number().int().positive().nullable().optional(),
   nombre: z.string().min(2).max(150),
   descripcionCorta: z.string().max(255).optional(),
   descripcion: z.string().optional(),

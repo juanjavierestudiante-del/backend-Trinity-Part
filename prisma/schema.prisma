@@ -15,19 +15,45 @@ datasource db {
 // USUARIO ADMIN (para login del panel)
 // ============================================
 model Usuario {
-  id_usuario    Int            @id @default(autoincrement())
-  nombre        String         @db.VarChar(150)
-  email         String         @unique @db.VarChar(150)
-  password      String         @db.VarChar(255) // hash bcrypt
-  rol           RolUsuario     @default(ADMIN)
-  estado        EstadoGenerico @default(Activo)
-  fechaRegistro DateTime       @default(now()) @map("fecha_registro")
+  id_usuario         Int            @id @default(autoincrement())
+  nombre             String         @db.VarChar(150)
+  apellido           String?        @db.VarChar(150)
+  email              String         @unique @db.VarChar(150)
+  telefono           String?        @unique @db.VarChar(20)
+  password           String?        @db.VarChar(255) // hash bcrypt
+  avatarUrl          String?        @map("avatar_url") @db.VarChar(500)
+  rol                RolUsuario     @default(ADMIN)
+  estado             EstadoGenerico @default(Activo)
+  emailVerificado    Boolean        @default(false) @map("email_verificado")
+  telefonoVerificado Boolean        @default(false) @map("telefono_verificado")
+  fechaRegistro      DateTime       @default(now()) @map("fecha_registro")
+  fechaActualizacion DateTime       @default(now()) @updatedAt @map("fecha_actualizacion")
 
   movimientosInventario MovimientoInventario[]
   carrito               Carrito?
   pedidos               Pedido[]
+  cuentasAuth           AuthAccount[]
 
   @@map("usuario")
+}
+
+enum ProveedorAuth {
+  LOCAL
+  GOOGLE
+}
+
+model AuthAccount {
+  idAuthAccount  Int           @id @default(autoincrement()) @map("id_auth_account")
+  idUsuario      Int           @map("id_usuario")
+  provider       ProveedorAuth
+  providerUserId String        @map("provider_user_id") @db.VarChar(255)
+  fechaCreacion  DateTime      @default(now()) @map("fecha_creacion")
+
+  usuario Usuario @relation(fields: [idUsuario], references: [id_usuario], onDelete: Cascade)
+
+  @@unique([provider, providerUserId])
+  @@index([idUsuario])
+  @@map("auth_account")
 }
 
 enum RolUsuario {

@@ -22,12 +22,29 @@ interface Env {
   jwt: {
     secret: string;
     expiresIn: string;
+    cookieMaxAgeMs: number;
+    cookieSameSite: 'lax' | 'strict' | 'none';
+  };
+  cors: {
+    origins: string[];
   };
   cloudinary: {
     cloudName: string | undefined;
     apiKey: string | undefined;
     apiSecret: string | undefined;
   };
+}
+
+const parseCookieSameSite = (value: string | undefined): 'lax' | 'strict' | 'none' => {
+  if (value === 'strict' || value === 'none' || value === 'lax') return value;
+  return 'lax';
+};
+
+const cookieSameSite = parseCookieSameSite(process.env.COOKIE_SAME_SITE);
+
+if (process.env.NODE_ENV === 'production' && !process.env.FRONTEND_URL) {
+  console.error('❌ Falta la variable de entorno requerida en producción: FRONTEND_URL');
+  process.exit(1);
 }
 
 export const env: Env = {
@@ -37,6 +54,14 @@ export const env: Env = {
   jwt: {
     secret: process.env.JWT_SECRET as string,
     expiresIn: process.env.JWT_EXPIRES_IN || '8h',
+    cookieMaxAgeMs: Number(process.env.JWT_COOKIE_MAX_AGE_MS) || 8 * 60 * 60 * 1000,
+    cookieSameSite,
+  },
+  cors: {
+    origins: (process.env.FRONTEND_URL || 'http://localhost:5173')
+      .split(',')
+      .map((origin) => origin.trim())
+      .filter(Boolean),
   },
   cloudinary: {
     cloudName: process.env.CLOUDINARY_CLOUD_NAME,

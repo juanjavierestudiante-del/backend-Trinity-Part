@@ -75,12 +75,12 @@ La app falla al iniciar si falta alguna de las requeridas (`DATABASE_URL`, `JWT_
 ## Autenticación
 
 - **Login:** `POST /api/auth/login` → JWT con payload `{ id_usuario, email, rol }`.
-- **Protección:** `authMiddleware` verifica `Authorization: Bearer <token>`.
-- **Rutas admin:** Todas bajo `/api/admin/*` requieren JWT.
-- **Roles:** ADMIN, EMPLEADO, CLIENTE. Escrituras admin y GET pedidos admin usan `requireRole('ADMIN')`; otros GET admin solo exigen JWT.
+- **Protección:** `authMiddleware` verifica cookie HttpOnly `access_token` y carga el usuario actual desde DB.
+- **Rutas admin:** Todas bajo `/api/admin/*` requieren sesión y `ADMIN`.
+- **Roles:** ADMIN, EMPLEADO, CLIENTE. `/api/auth/admin/login` exige ADMIN.
 - **Registro:** `/api/auth/register` crea CLIENTE; el default Prisma Usuario sigue siendo ADMIN.
-- **Estado:** middleware consulta usuario activo; usa el rol del JWT para autorización. Login no verifica estado antes de firmar.
-- **Perfil:** retorna `{ usuario: req.usuario }` (payload JWT), no registro completo.
+- **Estado:** login y middleware rechazan usuario inactivo; autorización usa el rol actual de DB.
+- **Perfil:** `/api/auth/me` retorna usuario seguro actual desde DB; `/perfil` es alias temporal.
 - **Seed:** `prisma/seed.ts` existe y está declarado en package.json; no reproducir credenciales.
 
 ## Imágenes (Cloudinary)

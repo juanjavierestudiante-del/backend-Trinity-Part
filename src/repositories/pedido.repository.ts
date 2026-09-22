@@ -25,33 +25,6 @@ const includeAdmin = {
   },
 } satisfies Prisma.PedidoInclude;
 
-export const create = (
-  idUsuario: number,
-  total: number,
-  items: { idVariante: number; cantidad: number; precioUnitario: number }[],
-  contacto: { nombreContacto: string; telefonoContacto: string; direccionEntrega?: string | null; notas?: string | null }
-) => {
-  return prisma.pedido.create({
-    data: {
-      idUsuario,
-      total,
-      estado: EstadoPedido.PENDIENTE,
-      nombreContacto: contacto.nombreContacto,
-      telefonoContacto: contacto.telefonoContacto,
-      direccionEntrega: contacto.direccionEntrega ?? null,
-      notas: contacto.notas ?? null,
-      items: {
-        create: items.map((item) => ({
-          idVariante: item.idVariante,
-          cantidad: item.cantidad,
-          precioUnitario: item.precioUnitario,
-        })),
-      },
-    },
-    include: includeDetalles,
-  });
-};
-
 export const findByUsuario = (idUsuario: number) => {
   return prisma.pedido.findMany({
     where: { idUsuario },

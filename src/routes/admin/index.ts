@@ -5,6 +5,8 @@ import inventarioRoutes from './inventario.routes.js';
 import productoVarianteRoutes from './productoVariante.routes.js';
 import imagenRoutes from './imagen.routes.js';
 import pedidoRoutes from './pedido.routes.js';
+import entregaRoutes from './entrega.routes.js';
+import precioCantidadRoutes from './precio-cantidad.routes.js';
 import { requireRole } from '../../middlewares/auth.middleware.js';
 import { validate } from '../../middlewares/validate.middleware.js';
 import {
@@ -25,6 +27,8 @@ router.use('/inventario', inventarioRoutes);
 router.use('/variantes', productoVarianteRoutes);
 router.use('/imagenes', imagenRoutes);
 router.use('/pedidos', pedidoRoutes);
+router.use('/', precioCantidadRoutes);
+router.use('/', entregaRoutes);
 
 export default router;
 

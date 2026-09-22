@@ -1,7 +1,7 @@
 import { z } from 'zod';
-import { EstadoPedido } from '@prisma/client';
+import { EstadoPedido, MetodoEntrega } from '@prisma/client';
 
-export const crearPedidoSchema = z.object({
+const contactoPedidoSchema = z.object({
   nombreContacto: z
     .string()
     .trim()
@@ -12,12 +12,6 @@ export const crearPedidoSchema = z.object({
     .trim()
     .min(1, 'El teléfono de contacto es obligatorio')
     .max(50, 'El teléfono de contacto no puede superar 50 caracteres'),
-  direccionEntrega: z
-    .string()
-    .trim()
-    .max(255, 'La dirección de entrega no puede superar 255 caracteres')
-    .nullable()
-    .optional(),
   notas: z
     .string()
     .trim()
@@ -25,6 +19,52 @@ export const crearPedidoSchema = z.object({
     .nullable()
     .optional(),
 });
+
+const legacyPedidoSchema = contactoPedidoSchema.extend({
+  direccionEntrega: z
+    .string()
+    .trim()
+    .max(255, 'La dirección de entrega no puede superar 255 caracteres')
+    .nullable()
+    .optional(),
+}).strict();
+
+const puntoEntregaPedidoSchema = contactoPedidoSchema.extend({
+  metodoEntrega: z.literal(MetodoEntrega.PUNTO_ENTREGA),
+  idPuntoEntrega: z.number().int().positive('El punto de entrega es obligatorio'),
+}).strict();
+
+const recojoTiendaPedidoSchema = contactoPedidoSchema.extend({
+  metodoEntrega: z.literal(MetodoEntrega.RECOJO_TIENDA),
+  idPuntoEntrega: z.number().int().positive('El punto de recojo es obligatorio'),
+}).strict();
+
+const deliveryPedidoSchema = contactoPedidoSchema.extend({
+  metodoEntrega: z.literal(MetodoEntrega.DELIVERY),
+  deliveryZona: z
+    .string()
+    .trim()
+    .min(1, 'La zona de delivery es obligatoria')
+    .max(150, 'La zona de delivery no puede superar 150 caracteres'),
+  deliveryDireccion: z
+    .string()
+    .trim()
+    .min(1, 'La dirección de delivery es obligatoria')
+    .max(255, 'La dirección de delivery no puede superar 255 caracteres'),
+  deliveryReferencia: z
+    .string()
+    .trim()
+    .max(255, 'La referencia de delivery no puede superar 255 caracteres')
+    .nullable()
+    .optional(),
+}).strict();
+
+export const crearPedidoSchema = z.union([
+  legacyPedidoSchema,
+  puntoEntregaPedidoSchema,
+  recojoTiendaPedidoSchema,
+  deliveryPedidoSchema,
+]);
 
 export const actualizarEstadoPedidoSchema = z.object({
   estado: z.nativeEnum(EstadoPedido),

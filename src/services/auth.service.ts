@@ -6,8 +6,9 @@ import * as usuarioRepository from '../repositories/usuario.repository.js';
 import { env } from '../config/env.js';
 import { AppError } from '../utils/helpers.js';
 import { normalizarEmail, normalizarTelefonoBolivia } from '../utils/auth.helpers.js';
-import type { LoginInput } from '../validations/auth.validation.js';
+import type { LoginInput, UpdateProfileInput } from '../validations/auth.validation.js';
 import type { RolUsuario, Usuario } from '@prisma/client';
+import { OAuth2Client } from 'google-auth-library';
 
 export const usuarioSeguro = (usuario: Usuario) => ({
   id_usuario: usuario.id_usuario,
@@ -88,5 +89,68 @@ export const obtenerUsuarioActual = async (idUsuario: number) => {
   if (!usuario || usuario.estado !== 'Activo') {
     throw new AppError('Usuario inactivo o no encontrado', 401);
   }
+  return usuarioSeguro(usuario);
+};
+
+const googleClient = new OAuth2Client();
+export const loginGoogle = async (credential: string) => {
+  if (!env.google.clientId) throw new AppError('Google Login no está configurado', 503);
+  let payload;
+  try { payload = (await googleClient.verifyIdToken({ idToken: credential, audience: env.google.clientId })).getPayload(); } catch { throw new AppError('No se pudo iniciar sesión con Google', 401); }
+  if (!payload?.sub || !payload.email) throw new AppError('No se pudo iniciar sesión con Google', 401);
+  const account = await usuarioRepository.findGoogleAccount(payload.sub);
+  let usuario: Usuario;
+  if (account) usuario = account.usuario;
+  else {
+    const email = normalizarEmail(payload.email);
+    const existing = await usuarioRepository.findByEmail(email);
+    if (existing) {
+      if (!payload.email_verified) throw new AppError('Google no confirmó este correo electrónico', 403);
+      await usuarioRepository.createGoogleAccount(existing.id_usuario, payload.sub);
+      usuario = await usuarioRepository.updateGoogleUser(existing.id_usuario, { emailVerificado: true });
+    } else {
+      usuario = await usuarioRepository.create({ nombre: payload.given_name || payload.name || 'Usuario', apellido: payload.family_name || null, email, password: null, avatarUrl: payload.picture || null, rol: 'CLIENTE', emailVerificado: payload.email_verified === true, telefonoVerificado: false });
+      await usuarioRepository.createGoogleAccount(usuario.id_usuario, payload.sub);
+    }
+  }
+  if (usuario.estado !== 'Activo') throw new AppError('Credenciales inválidas', 401);
+  return { usuario: usuarioSeguro(usuario), token: crearToken(usuario) };
+};
+
+export const completarTelefono = async (idUsuario: number, telefono: string) => {
+  const telefonoNormalizado = normalizarTelefonoBolivia(telefono);
+  const existente = await usuarioRepository.findByTelefono(telefonoNormalizado);
+  if (existente && existente.id_usuario !== idUsuario) throw new AppError('El teléfono ya está registrado', 409);
+  return usuarioSeguro(await usuarioRepository.updateTelefono(idUsuario, telefonoNormalizado));
+};
+
+export const actualizarPerfil = async (idUsuario: number, input: UpdateProfileInput) => {
+  const usuarioActual = await usuarioRepository.findById(idUsuario);
+  if (!usuarioActual || usuarioActual.estado !== 'Activo') {
+    throw new AppError('Usuario inactivo o no encontrado', 401);
+  }
+
+  const telefonoNormalizado = normalizarTelefonoBolivia(input.telefono);
+  const existente = await usuarioRepository.findByTelefono(telefonoNormalizado);
+  if (existente && existente.id_usuario !== idUsuario) {
+    throw new AppError('El teléfono ya está registrado', 409);
+  }
+
+  const telefonoCambio = telefonoNormalizado !== usuarioActual.telefono;
+  let usuario: Usuario;
+  try {
+    usuario = await usuarioRepository.updateProfile(idUsuario, {
+      nombre: input.nombre.trim(),
+      apellido: input.apellido?.trim() || null,
+      telefono: telefonoNormalizado,
+      ...(telefonoCambio ? { telefonoVerificado: false } : {}),
+    });
+  } catch (error: any) {
+    if (error?.code === 'P2002') {
+      throw new AppError('El teléfono ya está registrado', 409);
+    }
+    throw error;
+  }
+
   return usuarioSeguro(usuario);
 };

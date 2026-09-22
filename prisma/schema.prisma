@@ -181,6 +181,7 @@ model Producto {
   atributoPrincipal Atributo?          @relation("AtributoPrincipalProducto", fields: [idAtributoPrincipal], references: [idAtributo], onDelete: SetNull)
   imagenes          ImagenProducto[]
   variantes         ProductoVariante[]
+  listaPrecios      ListaPrecio[]
 
   @@index([idCategoria])
   @@index([idAtributoPrincipal])
@@ -218,17 +219,17 @@ model ProductoVariante {
   idProducto        Int            @map("id_producto")
   idMarca           Int?           @map("id_marca")
   idUnidad          Int?           @map("id_unidad")
+  idListaPrecio     Int?           @map("id_lista_precio")
   cantidadContenido Decimal        @default(1.00) @map("cantidad_contenido") @db.Decimal(10, 2)
   sku               String         @unique @db.VarChar(50)
   codigoBarras      String?        @unique @map("codigo_barras") @db.VarChar(100)
-  precioVenta       Decimal        @map("precio_venta") @db.Decimal(10, 2)
-  precioOferta      Decimal?       @map("precio_oferta") @db.Decimal(10, 2)
   peso              Decimal?       @db.Decimal(10, 2)
   estado            EstadoGenerico @default(Activo)
 
-  producto Producto      @relation(fields: [idProducto], references: [idProducto], onDelete: Cascade)
-  marca    Marca?        @relation(fields: [idMarca], references: [idMarca])
-  unidad   UnidadMedida? @relation(fields: [idUnidad], references: [idUnidad])
+  producto    Producto      @relation(fields: [idProducto], references: [idProducto], onDelete: Cascade)
+  marca       Marca?        @relation(fields: [idMarca], references: [idMarca])
+  unidad      UnidadMedida? @relation(fields: [idUnidad], references: [idUnidad])
+  listaPrecio ListaPrecio?  @relation(fields: [idListaPrecio], references: [idListaPrecio], onDelete: SetNull)
 
   imagenes              ImagenVariante[]
   inventario            Inventario?
@@ -239,7 +240,47 @@ model ProductoVariante {
   pedidoItems           PedidoDetalle[]
 
   @@index([idProducto])
+  @@index([idListaPrecio])
   @@map("producto_variante")
+}
+
+// ============================================
+// LISTA_PRECIO / REGLA_PRECIO_CANTIDAD
+// ============================================
+model ListaPrecio {
+  idListaPrecio      Int      @id @default(autoincrement()) @map("id_lista_precio")
+  idProducto         Int      @map("id_producto")
+  nombre             String   @db.VarChar(100)
+  principal          Boolean  @default(false)
+  activo             Boolean  @default(true)
+  fechaCreacion      DateTime @default(now()) @map("fecha_creacion")
+  fechaActualizacion DateTime @default(now()) @updatedAt @map("fecha_actualizacion")
+
+  producto  Producto              @relation(fields: [idProducto], references: [idProducto], onDelete: Cascade)
+  reglas    ReglaPrecioCantidad[]
+  variantes ProductoVariante[]
+
+  @@index([idProducto, activo], map: "lista_precio_producto_activo_idx")
+  @@map("lista_precio")
+}
+
+model ReglaPrecioCantidad {
+  idReglaPrecio         Int      @id @default(autoincrement()) @map("id_regla_precio")
+  idListaPrecio         Int      @map("id_lista_precio")
+  nombre                String   @db.VarChar(100)
+  cantidadMinima        Int      @map("cantidad_minima")
+  precioPorPresentacion Decimal  @map("precio_por_presentacion") @db.Decimal(10, 2)
+  principal             Boolean  @default(false)
+  activo                Boolean  @default(true)
+  orden                 Int      @default(0)
+  fechaCreacion         DateTime @default(now()) @map("fecha_creacion")
+  fechaActualizacion    DateTime @default(now()) @updatedAt @map("fecha_actualizacion")
+
+  listaPrecio ListaPrecio @relation(fields: [idListaPrecio], references: [idListaPrecio], onDelete: Cascade)
+
+  @@unique([idListaPrecio, cantidadMinima], map: "regla_precio_cantidad_lista_cantidad_minima_key")
+  @@index([idListaPrecio, activo, orden], map: "regla_precio_cantidad_lista_activo_orden_idx")
+  @@map("regla_precio_cantidad")
 }
 
 // ============================================
@@ -365,21 +406,67 @@ enum EstadoPedido {
   CANCELADO
 }
 
-model Pedido {
-  idPedido         Int          @id @default(autoincrement()) @map("id_pedido")
-  idUsuario        Int          @map("id_usuario")
-  estado           EstadoPedido @default(PENDIENTE)
-  total            Decimal      @db.Decimal(10, 2)
-  nombreContacto   String       @map("nombre_contacto") @db.VarChar(150)
-  telefonoContacto String       @map("telefono_contacto") @db.VarChar(50)
-  direccionEntrega String?      @map("direccion_entrega") @db.VarChar(255)
-  notas            String?      @db.Text
-  fechaCreacion    DateTime     @default(now()) @map("fecha_creacion")
+enum MetodoEntrega {
+  PUNTO_ENTREGA
+  RECOJO_TIENDA
+  DELIVERY
+}
 
-  usuario Usuario         @relation(fields: [idUsuario], references: [id_usuario])
-  items   PedidoDetalle[]
+enum TipoPuntoEntrega {
+  PUNTO_ENTREGA
+  RECOJO_TIENDA
+}
+
+model PuntoEntrega {
+  idPuntoEntrega     Int              @id @default(autoincrement()) @map("id_punto_entrega")
+  nombre             String           @unique @db.VarChar(150)
+  descripcion        String?          @db.Text
+  referencia         String?          @db.VarChar(255)
+  activo             Boolean          @default(true)
+  orden              Int              @default(0)
+  tipo               TipoPuntoEntrega
+  fechaCreacion      DateTime         @default(now()) @map("fecha_creacion")
+  fechaActualizacion DateTime         @default(now()) @updatedAt @map("fecha_actualizacion")
+  pedidos            Pedido[]
+
+  @@index([activo, tipo, orden])
+  @@map("punto_entrega")
+}
+
+model ConfiguracionEntrega {
+  id                  Int      @id @default(1)
+  deliveryHabilitado  Boolean  @default(true) @map("delivery_habilitado")
+  montoMinimoDelivery Decimal  @default(150) @map("monto_minimo_delivery") @db.Decimal(10, 2)
+  mensajeDelivery     String?  @map("mensaje_delivery") @db.VarChar(255)
+  fechaActualizacion  DateTime @default(now()) @updatedAt @map("fecha_actualizacion")
+
+  @@map("configuracion_entrega")
+}
+
+model Pedido {
+  idPedido               Int            @id @default(autoincrement()) @map("id_pedido")
+  idUsuario              Int            @map("id_usuario")
+  estado                 EstadoPedido   @default(PENDIENTE)
+  total                  Decimal        @db.Decimal(10, 2)
+  nombreContacto         String         @map("nombre_contacto") @db.VarChar(150)
+  telefonoContacto       String         @map("telefono_contacto") @db.VarChar(50)
+  direccionEntrega       String?        @map("direccion_entrega") @db.VarChar(255)
+  metodoEntrega          MetodoEntrega? @map("metodo_entrega")
+  idPuntoEntrega         Int?           @map("id_punto_entrega")
+  puntoEntregaNombre     String?        @map("punto_entrega_nombre") @db.VarChar(150)
+  puntoEntregaReferencia String?        @map("punto_entrega_referencia") @db.VarChar(255)
+  deliveryZona           String?        @map("delivery_zona") @db.VarChar(150)
+  deliveryDireccion      String?        @map("delivery_direccion") @db.VarChar(255)
+  deliveryReferencia     String?        @map("delivery_referencia") @db.VarChar(255)
+  notas                  String?        @db.Text
+  fechaCreacion          DateTime       @default(now()) @map("fecha_creacion")
+
+  usuario      Usuario         @relation(fields: [idUsuario], references: [id_usuario])
+  puntoEntrega PuntoEntrega?   @relation(fields: [idPuntoEntrega], references: [idPuntoEntrega], onDelete: SetNull)
+  items        PedidoDetalle[]
 
   @@index([idUsuario, fechaCreacion])
+  @@index([idPuntoEntrega])
   @@map("pedido")
 }
 

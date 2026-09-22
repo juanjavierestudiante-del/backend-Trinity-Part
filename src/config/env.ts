@@ -33,6 +33,7 @@ interface Env {
     apiKey: string | undefined;
     apiSecret: string | undefined;
   };
+  google: { clientId: string | undefined };
 }
 
 const parseCookieSameSite = (value: string | undefined): 'lax' | 'strict' | 'none' => {
@@ -68,4 +69,5 @@ export const env: Env = {
     apiKey: process.env.CLOUDINARY_API_KEY,
     apiSecret: process.env.CLOUDINARY_API_SECRET,
   },
+  google: { clientId: process.env.GOOGLE_CLIENT_ID },
 };

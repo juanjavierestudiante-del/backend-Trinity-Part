@@ -1,0 +1,13 @@
+import { Router } from 'express';
+import * as controller from '../../controllers/precio-cantidad-admin.controller.js';
+import { requireRole } from '../../middlewares/auth.middleware.js';
+import { validate } from '../../middlewares/validate.middleware.js';
+import { asignarListaPrecioSchema, listaPrecioSchema, previsualizarPrecioCantidadSchema } from '../../validations/precio-cantidad.validation.js';
+const router = Router();
+router.get('/productos/:idProducto/precios-cantidad', controller.obtenerConfiguracion);
+router.post('/productos/:idProducto/listas-precio', requireRole('ADMIN'), validate(listaPrecioSchema), controller.crearLista);
+router.put('/productos/:idProducto/listas-precio/:idListaPrecio', requireRole('ADMIN'), validate(listaPrecioSchema), controller.guardarLista);
+router.delete('/productos/:idProducto/listas-precio/:idListaPrecio', requireRole('ADMIN'), controller.eliminarLista);
+router.put('/productos/:idProducto/variantes/lista-precio', requireRole('ADMIN'), validate(asignarListaPrecioSchema), controller.asignarLista);
+router.post('/precios-cantidad/previsualizar', requireRole('ADMIN'), validate(previsualizarPrecioCantidadSchema), controller.previsualizar);
+export default router;

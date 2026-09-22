@@ -2,11 +2,15 @@ import { z } from 'zod';
 
 export const agregarItemSchema = z.object({
   idVariante: z.number().int().positive(),
-  cantidad: z.number().int().positive().max(100).default(1),
+  cantidad: z.number().int().positive().default(1),
 });
 
 export const actualizarItemSchema = z.object({
-  cantidad: z.number().int().positive().max(100),
+  cantidad: z.number().int().positive(),
+});
+
+export const idDetalleParamsSchema = z.object({
+  idDetalle: z.coerce.number().int().positive(),
 });
 
 export type AgregarItemInput = z.infer<typeof agregarItemSchema>;

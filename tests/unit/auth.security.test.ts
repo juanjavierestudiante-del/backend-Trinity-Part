@@ -21,6 +21,7 @@ vi.mock('../../src/config/env.js', () => ({
 vi.mock('../../src/repositories/usuario.repository.js', () => ({
   findByEmail: mocks.findByEmail,
   findById: mocks.findById,
+  findAuthById: mocks.findById,
   findByTelefono: mocks.findByTelefono,
   create: mocks.create,
 }));

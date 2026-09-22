@@ -1,0 +1,10 @@
+import type { Request, Response } from 'express';
+import * as service from '../services/precio-cantidad-admin.service.js';
+import { asyncHandler, AppError } from '../utils/helpers.js';
+const id = (valor: string, etiqueta: string) => { const numero = Number(valor); if (!Number.isInteger(numero) || numero <= 0) throw new AppError(`${etiqueta} no válido.`, 400); return numero; };
+export const obtenerConfiguracion = asyncHandler(async (req: Request, res: Response) => res.json(await service.obtenerConfiguracion(id(req.params.idProducto, 'Producto'))));
+export const crearLista = asyncHandler(async (req: Request, res: Response) => res.status(201).json(await service.guardarLista(id(req.params.idProducto, 'Producto'), null, req.body)));
+export const guardarLista = asyncHandler(async (req: Request, res: Response) => res.json(await service.guardarLista(id(req.params.idProducto, 'Producto'), id(req.params.idListaPrecio, 'Lista'), req.body)));
+export const eliminarLista = asyncHandler(async (req: Request, res: Response) => { await service.eliminarLista(id(req.params.idProducto, 'Producto'), id(req.params.idListaPrecio, 'Lista')); res.status(204).end(); });
+export const asignarLista = asyncHandler(async (req: Request, res: Response) => { await service.asignarLista(id(req.params.idProducto, 'Producto'), req.body); res.status(204).end(); });
+export const previsualizar = asyncHandler(async (req: Request, res: Response) => res.json(service.previsualizar(req.body)));

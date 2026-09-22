@@ -1,0 +1,11 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import request from 'supertest';
+const service = vi.hoisted(() => ({ obtenerConfiguracion: vi.fn(), guardarLista: vi.fn(), eliminarLista: vi.fn(), asignarLista: vi.fn(), previsualizar: vi.fn() }));
+vi.mock('../../src/services/precio-cantidad-admin.service.js', () => service);
+vi.mock('../../src/middlewares/auth.middleware.js', () => ({ authMiddleware: (req: any, res: any, next: any) => { if (!req.header('x-test-role')) return res.status(401).json({ error: 'Token no proporcionado' }); req.usuario = { rol: req.header('x-test-role') }; next(); }, requireRole: (...roles: string[]) => (req: any, res: any, next: any) => roles.includes(req.usuario?.rol) ? next() : res.status(403).json({ error: 'No tienes permisos' }) }));
+import app from '../../src/app.js';
+beforeEach(() => { vi.clearAllMocks(); service.obtenerConfiguracion.mockResolvedValue({ producto: { idProducto: 3, nombre: 'Globos' }, listasPrecio: [], variantes: [] }); service.guardarLista.mockResolvedValue({ idListaPrecio: 1, reglas: [] }); service.previsualizar.mockReturnValue({ cantidad: 7, cantidadMinimaAplicada: 5, precioPorPresentacion: '18.00', subtotal: '126.00', idReglaPrecio: 2 }); });
+describe('rutas admin listas de precios', () => {
+  it('obtiene configuración y protege escritura', async () => { expect((await request(app).get('/api/admin/productos/3/precios-cantidad').set('x-test-role','ADMIN')).status).toBe(200); expect((await request(app).post('/api/admin/productos/3/listas-precio').send({})).status).toBe(401); });
+  it('crea, previsualiza y asigna listas', async () => { const body = { nombre:'Normal', principal:true, activo:true, reglas:[{ nombre:'Normal', cantidadMinima:1, precioPorPresentacion:'20.00', principal:true, activo:true, orden:0 }] }; expect((await request(app).post('/api/admin/productos/3/listas-precio').set('x-test-role','ADMIN').send(body)).status).toBe(201); expect((await request(app).post('/api/admin/precios-cantidad/previsualizar').set('x-test-role','ADMIN').send({cantidad:7,reglas:body.reglas})).status).toBe(200); expect((await request(app).put('/api/admin/productos/3/variantes/lista-precio').set('x-test-role','ADMIN').send({idsVariante:[4,5],idListaPrecio:1})).status).toBe(204); });
+});

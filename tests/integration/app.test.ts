@@ -1,5 +1,9 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import request from 'supertest';
+
+vi.mock('../../src/repositories/producto.repository.js', () => ({
+  findAll: vi.fn().mockResolvedValue({ items: [], total: 0 }),
+}));
 import app from '../../src/app.js';
 
 describe('Health check', () => {

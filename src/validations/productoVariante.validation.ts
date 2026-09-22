@@ -9,8 +9,6 @@ export const crearVarianteSchema = z.object({
   cantidadContenido: z.number().positive().default(1),
   sku: z.string().min(2).max(50),
   codigoBarras: z.string().max(100).optional(),
-  precioVenta: z.number().positive(),
-  precioOferta: z.number().positive().optional(),
   peso: z.number().positive().optional(),
   estado: z.enum(['Activo', 'Inactivo']).optional(),
 });

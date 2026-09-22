@@ -13,6 +13,19 @@ const includeCompleto = {
     },
   },
   imagenes: { orderBy: { ordenImagen: 'asc' } },
+  listaPrecios: {
+    where: { activo: true },
+    select: {
+      idListaPrecio: true,
+      nombre: true,
+      principal: true,
+      reglas: {
+        where: { activo: true },
+        select: { idReglaPrecio: true, nombre: true, cantidadMinima: true, precioPorPresentacion: true, principal: true, orden: true },
+        orderBy: [{ cantidadMinima: 'asc' }, { orden: 'asc' }, { idReglaPrecio: 'asc' }],
+      },
+    },
+  },
   variantes: {
     include: {
       marca: true,
@@ -131,6 +144,18 @@ export const update = (idProducto: number | string, data: Prisma.ProductoUpdateI
     data,
     include: includeCompleto,
   });
+
+};
+export const tienePrecioPrincipalInicial = async (idProducto: number): Promise<boolean> => {
+  const listas = await prisma.listaPrecio.count({
+    where: {
+      idProducto,
+      principal: true,
+      activo: true,
+      reglas: { some: { activo: true, cantidadMinima: 1 } },
+    },
+  });
+  return listas > 0;
 };
 
 export const remove = (idProducto: number | string) => {

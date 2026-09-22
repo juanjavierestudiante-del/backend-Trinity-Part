@@ -2,6 +2,9 @@ import { Router } from 'express';
 import type { Request, Response, NextFunction } from 'express';
 import * as productoController from '../../controllers/producto.controller.js';
 import * as categoriaController from '../../controllers/categoria.controller.js';
+import * as precioPublicoController from '../../controllers/precio-publico.controller.js';
+import { validate } from '../../middlewares/validate.middleware.js';
+import { previsualizarPrecioSchema } from '../../validations/precio-publico.validation.js';
 
 const router = Router();
 
@@ -13,6 +16,7 @@ router.get('/productos', (req: Request, res: Response, next: NextFunction) => {
   next();
 }, productoController.listar);
 
+router.post('/productos/:idProducto/precio', validate(previsualizarPrecioSchema), precioPublicoController.previsualizar);
 router.get('/productos/:slug', productoController.obtenerPorSlug);
 
 router.get('/categorias', (req: Request, res: Response, next: NextFunction) => {

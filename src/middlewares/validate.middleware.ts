@@ -21,3 +21,21 @@ export const validate = (schema: ZodSchema): RequestHandler => {
     next();
   };
 };
+
+export const validateParams = (schema: ZodSchema): RequestHandler => {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    const result = schema.safeParse(req.params);
+
+    if (!result.success) {
+      const errores = result.error.errors.map((e) => ({
+        campo: e.path.join('.'),
+        mensaje: e.message,
+      }));
+      res.status(400).json({ error: 'Parámetros inválidos', detalles: errores });
+      return;
+    }
+
+    req.params = result.data;
+    next();
+  };
+};

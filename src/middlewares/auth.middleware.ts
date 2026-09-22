@@ -22,7 +22,7 @@ export const authMiddleware = async (req: Request, res: Response, next: NextFunc
   try {
     const payload = jwt.verify(token, env.jwt.secret) as JwtPayloadUsuario;
 
-    const usuario = await usuarioRepository.findById(payload.id_usuario);
+    const usuario = await usuarioRepository.findAuthById(payload.id_usuario);
     if (!usuario || usuario.estado !== 'Activo') {
       res.status(401).json({ error: 'Usuario inactivo o no encontrado' });
       return;

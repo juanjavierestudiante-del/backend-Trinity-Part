@@ -1,0 +1,5 @@
+import { asyncHandler, AppError } from '../utils/helpers.js'; import * as service from '../services/entrega.service.js';
+const id=(value:string)=>{const n=Number(value);if(!Number.isInteger(n)||n<1)throw new AppError('Punto de entrega no encontrado',404);return n};
+export const puntos=asyncHandler(async(req,res)=>{const tipo=req.query.tipo; if(tipo && tipo!=='PUNTO_ENTREGA'&&tipo!=='RECOJO_TIENDA')throw new AppError('Tipo de punto inválido',400);res.json(await service.publicos(tipo as any));});
+export const configuracion=asyncHandler(async(_req,res)=>{const c=await service.config();res.json({deliveryHabilitado:c.deliveryHabilitado,montoMinimoDelivery:c.montoMinimoDelivery.toString(),mensajeDelivery:c.mensajeDelivery});});
+export const listarAdmin=asyncHandler(async(_req,res)=>res.json(await service.admin())); export const crear=asyncHandler(async(req,res)=>res.status(201).json(await service.crear(req.body))); export const editar=asyncHandler(async(req,res)=>res.json(await service.editar(id(req.params.id),req.body))); export const actualizarConfig=asyncHandler(async(req,res)=>res.json(await service.actualizarConfig(req.body)));

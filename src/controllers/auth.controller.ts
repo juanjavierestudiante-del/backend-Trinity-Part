@@ -35,6 +35,12 @@ export const register = asyncHandler(async (req: Request, res: Response) => {
   setAuthCookie(res, token);
   res.status(201).json({ usuario });
 });
+export const google = asyncHandler(async (req: Request, res: Response) => { const { usuario, token } = await authService.loginGoogle(req.body.credential); setAuthCookie(res, token); res.json({ usuario }); });
+export const completeProfile = asyncHandler(async (req: Request, res: Response) => { const usuario = await authService.completarTelefono(req.usuario!.id_usuario, req.body.telefono); res.json({ usuario }); });
+export const updateProfile = asyncHandler(async (req: Request, res: Response) => {
+  const usuario = await authService.actualizarPerfil(req.usuario!.id_usuario, req.body);
+  res.json({ usuario });
+});
 
 export const me = asyncHandler(async (req: Request, res: Response) => {
   const usuario = await authService.obtenerUsuarioActual(req.usuario!.id_usuario);

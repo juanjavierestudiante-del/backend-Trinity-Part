@@ -477,6 +477,11 @@ model PedidoDetalle {
   cantidad       Int
   precioUnitario Decimal @map("precio_unitario") @db.Decimal(10, 2)
 
+  nombreProductoSnapshot            String? @map("nombre_producto_snapshot") @db.VarChar(150)
+  skuSnapshot                       String? @map("sku_snapshot") @db.VarChar(50)
+  nombreAtributoPrincipalSnapshot   String? @map("nombre_atributo_principal_snapshot") @db.VarChar(100)
+  valorAtributoPrincipalSnapshot    String? @map("valor_atributo_principal_snapshot") @db.VarChar(100)
+
   pedido   Pedido           @relation(fields: [idPedido], references: [idPedido], onDelete: Cascade)
   variante ProductoVariante @relation(fields: [idVariante], references: [idVariante])
 

@@ -1,12 +1,31 @@
-import { Prisma, EstadoPedido } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import prisma from '../config/prisma.js';
 
 const includeDetalles = {
   items: {
     include: {
       variante: {
-        include: {
-          producto: true,
+        select: {
+          idVariante: true,
+          sku: true,
+          producto: {
+            select: {
+              idProducto: true,
+              nombre: true,
+              idAtributoPrincipal: true,
+            },
+          },
+          varianteAtributo: {
+            select: {
+              valorAtributo: {
+                select: {
+                  idValor: true,
+                  idAtributo: true,
+                  valor: true,
+                },
+              },
+            },
+          },
         },
       },
     },
@@ -47,17 +66,9 @@ export const findAll = async (page = 1, limit = 20) => {
   return { items, total };
 };
 
-export const findById = (idPedido: number) => {
-  return prisma.pedido.findUnique({
+export const findByIdEnTx = (tx: Prisma.TransactionClient, idPedido: number) => {
+  return tx.pedido.findUnique({
     where: { idPedido },
-    include: includeAdmin,
-  });
-};
-
-export const updateEstado = (idPedido: number, estado: EstadoPedido) => {
-  return prisma.pedido.update({
-    where: { idPedido },
-    data: { estado },
     include: includeAdmin,
   });
 };

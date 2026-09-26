@@ -14,9 +14,10 @@ type Escenario = {
   precio?: string;
   punto?: Record<string, unknown> | null;
   configuracion?: { deliveryHabilitado: boolean; montoMinimoDelivery: Prisma.Decimal };
+  variante?: Record<string, unknown>;
 };
 
-const crearEscenario = ({ precio = '200', punto = null, configuracion }: Escenario = {}) => {
+const crearEscenario = ({ precio = '200', punto = null, configuracion, variante }: Escenario = {}) => {
   const pedidoCreate = vi.fn(async ({ data }) => ({ idPedido: 77, ...data }));
   const tx = {
     carrito: {
@@ -25,7 +26,7 @@ const crearEscenario = ({ precio = '200', punto = null, configuracion }: Escenar
         items: [{
           idVariante: 9,
           cantidad: 1,
-          variante: { sku: 'SKU-9', inventario: { stockActual: 10 } },
+          variante: variante ?? { sku: 'SKU-9', inventario: { stockActual: 10 } },
         }],
       }),
     },
@@ -157,5 +158,76 @@ describe('contrato logístico de pedidos 5C.1', () => {
     expect(crearPedidoSchema.safeParse({ ...contacto, metodoEntrega: 'DELIVERY', deliveryZona: 'Centro' }).success).toBe(false);
     expect(crearPedidoSchema.safeParse({ ...contacto, metodoEntrega: 'PUNTO_ENTREGA', idPuntoEntrega: 1, direccionEntrega: null }).success).toBe(false);
     expect(crearPedidoSchema.safeParse({ ...contacto, direccionEntrega: null }).success).toBe(true);
+  });
+});
+
+describe('snapshots históricos de PedidoDetalle', () => {
+  it('CASO A: guarda nombre, SKU y atributo principal resuelto al crear', async () => {
+    const variante = {
+      sku: 'CORT-VERDE',
+      inventario: { stockActual: 10 },
+      producto: { nombre: 'Cortina Metálica', idAtributoPrincipal: 3 },
+      varianteAtributo: [
+        { valorAtributo: { idAtributo: 3, valor: 'Verde', atributo: { nombre: 'Color' } } },
+        { valorAtributo: { idAtributo: 8, valor: 'Metálico', atributo: { nombre: 'Material' } } },
+      ],
+    };
+    const { pedidoCreate } = crearEscenario({ variante });
+    await pedidoService.crear(3, { ...contacto, direccionEntrega: 'Calle 1' });
+
+    const detalle = pedidoCreate.mock.calls[0][0].data.items.create[0];
+    expect(detalle.nombreProductoSnapshot).toBe('Cortina Metálica');
+    expect(detalle.skuSnapshot).toBe('CORT-VERDE');
+    expect(detalle.nombreAtributoPrincipalSnapshot).toBe('Color');
+    expect(detalle.valorAtributoPrincipalSnapshot).toBe('Verde');
+  });
+
+  it('CASO B: sin atributo principal guarda nombre + SKU con atributos null', async () => {
+    const variante = {
+      sku: 'GLOB-24',
+      inventario: { stockActual: 10 },
+      producto: { nombre: 'Globo Burbuja', idAtributoPrincipal: null },
+      varianteAtributo: [
+        { valorAtributo: { idAtributo: 2, valor: '24 pulgadas', atributo: { nombre: 'Tamaño' } } },
+      ],
+    };
+    const { pedidoCreate } = crearEscenario({ variante });
+    await pedidoService.crear(3, { ...contacto, direccionEntrega: 'Calle 1' });
+
+    const detalle = pedidoCreate.mock.calls[0][0].data.items.create[0];
+    expect(detalle.nombreProductoSnapshot).toBe('Globo Burbuja');
+    expect(detalle.skuSnapshot).toBe('GLOB-24');
+    expect(detalle.nombreAtributoPrincipalSnapshot).toBeNull();
+    expect(detalle.valorAtributoPrincipalSnapshot).toBeNull();
+  });
+
+  it('CASO C: precioUnitario mantiene exactamente el precio resuelto por la lógica existente', async () => {
+    const { pedidoCreate } = crearEscenario({ precio: '250.50' });
+    await pedidoService.crear(3, { ...contacto, direccionEntrega: 'Calle 1' });
+
+    const detalle = pedidoCreate.mock.calls[0][0].data.items.create[0];
+    expect(new Prisma.Decimal(detalle.precioUnitario).equals(new Prisma.Decimal('250.50'))).toBe(true);
+  });
+
+  it('CASO D: cambiar el producto vivo después NO modifica el snapshot ya guardado', async () => {
+    const variante = {
+      sku: 'CORT-VERDE',
+      inventario: { stockActual: 10 },
+      producto: { nombre: 'Cortina Metálica', idAtributoPrincipal: 3 },
+      varianteAtributo: [
+        { valorAtributo: { idAtributo: 3, valor: 'Verde', atributo: { nombre: 'Color' } } },
+      ],
+    };
+    const { pedidoCreate } = crearEscenario({ variante });
+    await pedidoService.crear(3, { ...contacto, direccionEntrega: 'Calle 1' });
+    const primerDetalle = pedidoCreate.mock.calls[0][0].data.items.create[0];
+
+    variante.producto.nombre = 'Cortina Premium';
+    await pedidoService.crear(3, { ...contacto, direccionEntrega: 'Calle 2' });
+    const segundoDetalle = pedidoCreate.mock.calls[1][0].data.items.create[0];
+
+    expect(primerDetalle.nombreProductoSnapshot).toBe('Cortina Metálica');
+    expect(primerDetalle.valorAtributoPrincipalSnapshot).toBe('Verde');
+    expect(segundoDetalle.nombreProductoSnapshot).toBe('Cortina Premium');
   });
 });

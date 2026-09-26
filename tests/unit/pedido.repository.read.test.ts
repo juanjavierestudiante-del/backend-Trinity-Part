@@ -5,7 +5,6 @@ const prisma = vi.hoisted(() => ({
     findMany: vi.fn(),
     count: vi.fn(),
     findUnique: vi.fn(),
-    update: vi.fn(),
   },
   carrito: { findUnique: vi.fn() },
   $transaction: vi.fn(),
@@ -45,12 +44,10 @@ describe('lectura logística de pedidos', () => {
     await expect(repository.findAll()).resolves.toEqual({ items: [pedidoLogistico], total: 1 });
   });
 
-  it('detalle y actualización mantienen un pedido histórico sin método', async () => {
+  it('detalle mantiene un pedido histórico sin método', async () => {
     const historico = { ...pedidoLogistico, metodoEntrega: null, deliveryZona: null, deliveryDireccion: null, direccionEntrega: null };
     prisma.pedido.findUnique.mockResolvedValue(historico);
-    prisma.pedido.update.mockResolvedValue(historico);
 
-    await expect(repository.findById(10)).resolves.toEqual(historico);
-    await expect(repository.updateEstado(10, 'CONFIRMADO')).resolves.toEqual(historico);
+    await expect(repository.findByIdEnTx(prisma, 10)).resolves.toEqual(historico);
   });
 });

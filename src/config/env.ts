@@ -36,12 +36,16 @@ interface Env {
   google: { clientId: string | undefined };
 }
 
-const parseCookieSameSite = (value: string | undefined): 'lax' | 'strict' | 'none' => {
+const parseCookieSameSite = (
+  value: string | undefined,
+  fallback: 'lax' | 'strict' | 'none'
+): 'lax' | 'strict' | 'none' => {
   if (value === 'strict' || value === 'none' || value === 'lax') return value;
-  return 'lax';
+  return fallback;
 };
 
-const cookieSameSite = parseCookieSameSite(process.env.COOKIE_SAME_SITE);
+const defaultCookieSameSite = process.env.NODE_ENV === 'production' ? 'none' : 'lax';
+const cookieSameSite = parseCookieSameSite(process.env.COOKIE_SAME_SITE, defaultCookieSameSite);
 
 if (process.env.NODE_ENV === 'production' && !process.env.FRONTEND_URL) {
   console.error('❌ Falta la variable de entorno requerida en producción: FRONTEND_URL');

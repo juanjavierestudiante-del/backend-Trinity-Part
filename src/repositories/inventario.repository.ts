@@ -1,4 +1,4 @@
-// Capa de acceso a datos para Inventario.
+// Inventario y movimientos: todas las cantidades y umbrales son unidades físicas base.
 
 import { Prisma } from '@prisma/client';
 import prisma from '../config/prisma.js';

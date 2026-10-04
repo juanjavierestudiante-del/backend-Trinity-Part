@@ -5,6 +5,8 @@ import prisma from '../config/prisma.js';
 
 const includeCompleto = {
   categoria: true,
+  perfilesPrecio: { where: { principal: true, activo: true }, select: { idPerfilPrecio: true } },
+  presentaciones: { where: { activo: true }, select: { idPresentacion: true, nombre: true, cantidadBase: true, principal: true } },
   atributoPrincipal: {
     select: {
       idAtributo: true,
@@ -17,6 +19,8 @@ const includeCompleto = {
     where: { activo: true },
     select: {
       idListaPrecio: true,
+      idPresentacion: true,
+      idPerfilPrecio: true,
       nombre: true,
       principal: true,
       reglas: {

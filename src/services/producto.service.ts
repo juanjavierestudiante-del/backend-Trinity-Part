@@ -19,11 +19,14 @@ type ProductoConListasPrecio = Awaited<ReturnType<typeof productoRepository.find
 
 /** Precio público inicial: una presentación, no la regla principal de UX. */
 const agregarResumenPrecio = (producto: ProductoConListasPrecio) => {
-  const listaPrincipal = producto.listaPrecios.find((lista) => lista.principal);
+  producto = { ...producto, variantes: producto.variantes.map(v => ({ ...v, disponibilidadPresentaciones: (producto.presentaciones ?? []).map(p => ({ ...p, disponible: v.estado === 'Activo' && producto.estado === 'Activo' && (v.inventario?.stockActual ?? 0) >= p.cantidadBase, cantidadMaxima: Math.floor((v.inventario?.stockActual ?? 0) / p.cantidadBase) })) })) };
+  const presentacionPrincipal = producto.presentaciones?.find(p => p.principal);
+  const perfilPrincipal = producto.perfilesPrecio?.[0];
   const precios = producto.variantes
     .filter((variante) => variante.estado === 'Activo')
     .flatMap((variante) => {
-      const lista = producto.listaPrecios.find((item) => item.idListaPrecio === variante.idListaPrecio) ?? listaPrincipal;
+      const perfilId = variante.idPerfilPrecio ?? perfilPrincipal?.idPerfilPrecio;
+      const lista = presentacionPrincipal && perfilId ? producto.listaPrecios.find(item => item.idPresentacion === presentacionPrincipal.idPresentacion && item.idPerfilPrecio === perfilId) : undefined;
       const reglaInicial = lista?.reglas.find((regla) => regla.cantidadMinima === 1);
       return reglaInicial ? [reglaInicial.precioPorPresentacion] : [];
     });

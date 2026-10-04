@@ -5,6 +5,7 @@ export interface CarritoItemView {
   idDetalle: number;
   idVariante: number;
   cantidad: number;
+  idPresentacion: number;
   stock: number;
   sku: string;
   producto: { idProducto: number; nombre: string; slug: string; imagen: string | null };
@@ -21,6 +22,7 @@ type CarritoRow = {
   idDetalle: number | null;
   idVariante: number | null;
   cantidad: number | null;
+  idPresentacion: number | null;
   stock: number | null;
   sku: string | null;
   idProducto: number | null;
@@ -58,6 +60,7 @@ export const obtenerVistaPorUsuario = async (idUsuario: number): Promise<Carrito
       cd."id_detalle" AS "idDetalle",
       cd."id_variante" AS "idVariante",
       cd."cantidad",
+      cd."id_presentacion" AS "idPresentacion",
       COALESCE(inv."stock_actual", 0) AS stock,
       pv.sku,
       p."id_producto" AS "idProducto",
@@ -92,6 +95,7 @@ export const obtenerVistaPorUsuario = async (idUsuario: number): Promise<Carrito
         idDetalle: row.idDetalle,
         idVariante: row.idVariante,
         cantidad: row.cantidad,
+        idPresentacion: row.idPresentacion!,
         stock: row.stock,
         sku: row.sku,
         producto: { idProducto: row.idProducto, nombre: row.nombre, slug: row.slug, imagen: row.imagen },
@@ -99,39 +103,34 @@ export const obtenerVistaPorUsuario = async (idUsuario: number): Promise<Carrito
   return { idCarrito, items, totalItems: items.length };
 };
 
-export const agregarItemAtomico = (idUsuario: number, idVariante: number, cantidad: number) =>
-  prisma.$queryRaw<AgregarItemRow[]>`SELECT * FROM agregar_item_carrito(${idUsuario}::integer, ${idVariante}::integer, ${cantidad}::integer)`;
+export const agregarItemAtomico = (idUsuario: number, idVariante: number, idPresentacion: number, cantidad: number) =>
+  prisma.$queryRaw<AgregarItemRow[]>`SELECT * FROM agregar_item_carrito(${idUsuario}::integer, ${idVariante}::integer, ${idPresentacion}::integer, ${cantidad}::integer)`;
 
-export const actualizarCantidadPropia = async (idUsuario: number, idDetalle: number, cantidad: number) => {
-  const [result] = await prisma.$queryRaw<MutationRow[]>`
+export const actualizarCantidadPropia = async (idUsuario: number, idDetalle: number, cantidad: number) => prisma.$transaction(async tx => {
+  await tx.$queryRaw`SELECT c.id_carrito FROM carrito c JOIN carrito_detalle cd ON cd.id_carrito=c.id_carrito WHERE c.id_usuario=${idUsuario} AND cd.id_detalle=${idDetalle} FOR UPDATE OF c`;
+  const [result] = await tx.$queryRaw<MutationRow[]>`
     WITH objetivo AS (
-      SELECT cd."id_detalle", cd."id_variante", COALESCE(i."stock_actual", 0) AS stock
-      FROM "carrito_detalle" cd
-      INNER JOIN "carrito" c ON c."id_carrito" = cd."id_carrito"
-      LEFT JOIN "inventario" i ON i."id_variante" = cd."id_variante"
-      WHERE cd."id_detalle" = ${idDetalle} AND c."id_usuario" = ${idUsuario}
+      SELECT cd.id_detalle, cd.id_variante, COALESCE(i.stock_actual,0) AS stock,
+        pv.cantidad_base, pv.activo,
+        (SELECT COALESCE(SUM(otro.cantidad::bigint*p.cantidad_base),0) FROM carrito_detalle otro JOIN presentacion_venta p ON p.id_presentacion=otro.id_presentacion
+         WHERE otro.id_carrito=cd.id_carrito AND otro.id_variante=cd.id_variante AND otro.id_detalle<>cd.id_detalle) AS otros
+      FROM carrito_detalle cd JOIN carrito c ON c.id_carrito=cd.id_carrito
+      JOIN presentacion_venta pv ON pv.id_presentacion=cd.id_presentacion
+      LEFT JOIN inventario i ON i.id_variante=cd.id_variante
+      WHERE cd.id_detalle=${idDetalle} AND c.id_usuario=${idUsuario}
     ), actualizado AS (
-      UPDATE "carrito_detalle" cd
-      SET "cantidad" = ${cantidad}
-      FROM objetivo o
-      WHERE cd."id_detalle" = o."id_detalle" AND o.stock >= ${cantidad}
-      RETURNING cd."id_detalle" AS "idDetalle", cd."id_variante" AS "idVariante", cd."cantidad"
-    )
-    SELECT
-      CASE
-        WHEN EXISTS (SELECT 1 FROM actualizado) THEN 'ACTUALIZADO'
-        WHEN EXISTS (SELECT 1 FROM objetivo) THEN 'STOCK_INSUFICIENTE'
-        ELSE 'NO_ENCONTRADO'
-      END AS estado,
-      (SELECT "idDetalle" FROM actualizado) AS "idDetalle",
-      (SELECT "idVariante" FROM actualizado) AS "idVariante",
-      (SELECT cantidad FROM actualizado) AS cantidad
-  `;
+      UPDATE carrito_detalle cd SET cantidad=${cantidad} FROM objetivo o
+      WHERE cd.id_detalle=o.id_detalle AND o.activo AND o.stock >= o.otros + ${cantidad}::bigint*o.cantidad_base
+      RETURNING cd.id_detalle AS "idDetalle",cd.id_variante AS "idVariante",cd.cantidad
+    ) SELECT CASE WHEN EXISTS(SELECT 1 FROM actualizado) THEN 'ACTUALIZADO'
+      WHEN EXISTS(SELECT 1 FROM objetivo) THEN 'STOCK_INSUFICIENTE' ELSE 'NO_ENCONTRADO' END AS estado,
+      (SELECT "idDetalle" FROM actualizado) AS "idDetalle", (SELECT "idVariante" FROM actualizado) AS "idVariante",(SELECT cantidad FROM actualizado) AS cantidad`;
   return result;
-};
+});
 
-export const eliminarItemPropio = async (idUsuario: number, idDetalle: number) => {
-  const [result] = await prisma.$queryRaw<MutationRow[]>`
+export const eliminarItemPropio = async (idUsuario: number, idDetalle: number) => prisma.$transaction(async tx => {
+  await tx.$queryRaw`SELECT c.id_carrito FROM carrito c JOIN carrito_detalle cd ON cd.id_carrito=c.id_carrito WHERE c.id_usuario=${idUsuario} AND cd.id_detalle=${idDetalle} FOR UPDATE OF c`;
+  const [result] = await tx.$queryRaw<MutationRow[]>`
     WITH eliminado AS (
       DELETE FROM "carrito_detalle" cd
       USING "carrito" c
@@ -147,7 +146,7 @@ export const eliminarItemPropio = async (idUsuario: number, idDetalle: number) =
       (SELECT cantidad FROM eliminado) AS cantidad
   `;
   return result;
-};
+});
 
 const includeCompleto = {
   items: {
@@ -224,9 +223,9 @@ export const findItemById = (idDetalle: number) => {
   return prisma.carritoDetalle.findUnique({ where: { idDetalle } });
 };
 
-export const findItemByCarritoYVariante = (idCarrito: number, idVariante: number) => {
+export const findItemByCarritoYVariante = (idCarrito: number, idVariante: number, idPresentacion: number) => {
   return prisma.carritoDetalle.findUnique({
-    where: { idCarrito_idVariante: { idCarrito, idVariante } },
+    where: { idCarrito_idVariante_idPresentacion: { idCarrito, idVariante, idPresentacion } },
   });
 };
 
@@ -240,11 +239,11 @@ export const findVarianteConInventario = (idVariante: number) => {
   });
 };
 
-export const upsertItem = (idCarrito: number, idVariante: number, cantidad: number) => {
+export const upsertItem = (idCarrito: number, idVariante: number, idPresentacion: number, cantidad: number) => {
   return prisma.carritoDetalle.upsert({
-    where: { idCarrito_idVariante: { idCarrito, idVariante } },
+    where: { idCarrito_idVariante_idPresentacion: { idCarrito, idVariante, idPresentacion } },
     update: { cantidad: { increment: cantidad } },
-    create: { idCarrito, idVariante, cantidad },
+    create: { idCarrito, idVariante, idPresentacion, cantidad },
   });
 };
 

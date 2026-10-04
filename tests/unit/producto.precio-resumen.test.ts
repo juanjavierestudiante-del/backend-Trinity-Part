@@ -9,11 +9,13 @@ const service = await import('../../src/services/producto.service.js');
 
 const producto = (precios: Array<{ idVariante: number; idListaPrecio: number | null; precio: string }>) => ({
   idProducto: 3,
+  presentaciones: [{ idPresentacion: 1, nombre: 'Unidad', cantidadBase: 1, principal: true }],
+  perfilesPrecio: [{ idPerfilPrecio: 1 }],
   listaPrecios: [
-    { idListaPrecio: 1, principal: true, reglas: [{ cantidadMinima: 1, precioPorPresentacion: new Prisma.Decimal('20') }] },
-    { idListaPrecio: 2, principal: false, reglas: [{ cantidadMinima: 1, precioPorPresentacion: new Prisma.Decimal('25') }] },
+    { idListaPrecio: 1, idPresentacion: 1, idPerfilPrecio: 1, principal: true, reglas: [{ cantidadMinima: 1, precioPorPresentacion: new Prisma.Decimal('20') }] },
+    { idListaPrecio: 2, idPresentacion: 1, idPerfilPrecio: 2, principal: false, reglas: [{ cantidadMinima: 1, precioPorPresentacion: new Prisma.Decimal('25') }] },
   ],
-  variantes: precios.map((item) => ({ idVariante: item.idVariante, idListaPrecio: item.idListaPrecio, estado: 'Activo' })),
+  variantes: precios.map((item) => ({ idVariante: item.idVariante, idListaPrecio: item.idListaPrecio, idPerfilPrecio: item.idListaPrecio === 2 ? 2 : null, estado: 'Activo' })),
   // El mock de reglas se ajusta abajo por lista para mantener el contrato Prisma mínimo.
   __precios: precios,
 });
@@ -21,8 +23,8 @@ const producto = (precios: Array<{ idVariante: number; idListaPrecio: number | n
 const conListas = (precios: Array<{ idVariante: number; idListaPrecio: number | null; precio: string }>) => ({
   ...producto(precios),
   listaPrecios: [
-    { idListaPrecio: 1, principal: true, reglas: [{ cantidadMinima: 1, precioPorPresentacion: new Prisma.Decimal(precios.find((item) => item.idListaPrecio === null)?.precio ?? '20') }] },
-    { idListaPrecio: 2, principal: false, reglas: [{ cantidadMinima: 1, precioPorPresentacion: new Prisma.Decimal(precios.find((item) => item.idListaPrecio === 2)?.precio ?? '25') }] },
+    { idListaPrecio: 1, idPresentacion: 1, idPerfilPrecio: 1, principal: true, reglas: [{ cantidadMinima: 1, precioPorPresentacion: new Prisma.Decimal(precios.find((item) => item.idListaPrecio === null)?.precio ?? '20') }] },
+    { idListaPrecio: 2, idPresentacion: 1, idPerfilPrecio: 2, principal: false, reglas: [{ cantidadMinima: 1, precioPorPresentacion: new Prisma.Decimal(precios.find((item) => item.idListaPrecio === 2)?.precio ?? '25') }] },
   ],
 });
 
@@ -35,7 +37,7 @@ describe('resumen público de precios', () => {
     expect(resultado.items[0]).toMatchObject({ precioDesde: '20.00', tieneVariacionPrecio: false });
   });
 
-  it('detecta una lista alternativa y expone Desde con el menor precio inicial', async () => {
+  it('detecta un perfil especial y expone Desde con el menor precio inicial', async () => {
     repository.findAll.mockResolvedValue({ items: [conListas([{ idVariante: 1, idListaPrecio: null, precio: '20' }, { idVariante: 2, idListaPrecio: 2, precio: '25' }])], total: 1 });
     const resultado = await service.listar({}, { page: 1, limit: 20 });
     expect(resultado.items[0]).toMatchObject({ precioDesde: '20.00', tieneVariacionPrecio: true });

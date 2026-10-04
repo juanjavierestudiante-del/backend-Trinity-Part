@@ -4,7 +4,7 @@ import { AppError } from '../utils/helpers.js';
 import { EstadoPedido, MetodoEntrega, Prisma, type TipoPuntoEntrega } from '@prisma/client';
 import type { CrearPedidoInput } from '../validations/pedido.validation.js';
 import { normalizarTelefonoBolivia } from '../utils/auth.helpers.js';
-import { resolverPreciosAgrupados } from './precio-cantidad.service.js';
+import { resolverVentasAgrupadas } from './resolucion-comercial.service.js';
 import { ErrorPrecioCantidad } from '../types/precio-cantidad.types.js';
 
 const tipoEsperadoPorMetodo: Record<
@@ -63,6 +63,7 @@ const resolverSnapshotsDetalle = (variante: VarianteParaSnapshot) => {
 export const crear = async (idUsuario: number, input: CrearPedidoInput) => {
   return prisma.$transaction(
     async (tx) => {
+      await tx.$queryRaw`SELECT id_carrito FROM carrito WHERE id_usuario=${idUsuario} FOR UPDATE`;
       const carrito = await tx.carrito.findUnique({
         where: { idUsuario },
         include: {
@@ -104,35 +105,26 @@ export const crear = async (idUsuario: number, input: CrearPedidoInput) => {
         throw new AppError('El carrito está vacío', 400);
       }
 
-      for (const item of carrito.items) {
-        const stock = item.variante.inventario?.stockActual ?? 0;
-        if (stock < item.cantidad) {
-          throw new AppError(
-            `Stock insuficiente para ${item.variante.sku}: disponible ${stock}, solicitado ${item.cantidad}`,
-            400
-          );
-        }
-      }
-
       let precios;
-      try {
-        precios = await resolverPreciosAgrupados(
-          carrito.items.map((item) => ({ idVariante: item.idVariante, cantidad: item.cantidad })),
-          tx
-        );
-      } catch (error) {
-        if (error instanceof ErrorPrecioCantidad) {
-          throw new AppError('No se pudo resolver el precio actual de los productos del carrito', 409);
-        }
-        throw error;
+      try { precios = await resolverVentasAgrupadas(carrito.items, tx); }
+      catch (error) { if (error instanceof ErrorPrecioCantidad) throw new AppError('No se pudo resolver el precio actual de los productos del carrito', 409); throw error; }
+      const itemsConPrecio = carrito.items.map((item, index) => {
+        const r = precios.lineas[index];
+        return { idVariante: item.idVariante, idPresentacion: r.presentacion.idPresentacion,
+          cantidad: item.cantidad, precioUnitario: r.precioPorPresentacion,
+          presentacionNombre: r.presentacion.nombre, cantidadBasePresentacion: r.presentacion.cantidadBase,
+          ...resolverSnapshotsDetalle(item.variante) };
+      });
+      const consumos = new Map<number, number>();
+      precios.lineas.forEach(r => consumos.set(r.idVariante, (consumos.get(r.idVariante) ?? 0) + r.cantidadBaseTotal));
+      const descuentos = [];
+      for (const [idVariante, cantidad] of [...consumos].sort((a,b) => a[0]-b[0])) {
+        if (!Number.isSafeInteger(cantidad) || cantidad > 2147483647) throw new AppError('Consumo base fuera del rango permitido', 400);
+        const resultado = await tx.inventario.updateMany({ where: { idVariante, stockActual: { gte: cantidad } }, data: { stockActual: { decrement: cantidad } } });
+        if (resultado.count !== 1) throw new AppError('Stock insuficiente (transacción abortada)', 400);
+        const actualizado = await tx.inventario.findUniqueOrThrow({ where: { idVariante }, select: { stockActual: true } });
+        descuentos.push({ idVariante, cantidad, stockAnterior: actualizado.stockActual + cantidad, stockNuevo: actualizado.stockActual });
       }
-      const preciosPorVariante = new Map(precios.lineas.map((linea) => [linea.idVariante, linea.precioPorPresentacion]));
-      const itemsConPrecio = carrito.items.map((item) => ({
-        idVariante: item.idVariante,
-        cantidad: item.cantidad,
-        precioUnitario: preciosPorVariante.get(item.idVariante)!,
-        ...resolverSnapshotsDetalle(item.variante),
-      }));
 
       const total = precios.total;
 
@@ -203,47 +195,10 @@ export const crear = async (idUsuario: number, input: CrearPedidoInput) => {
         data: {
           ...entrega,
           items: {
-            create: itemsConPrecio.map((item) => ({
-              idVariante: item.idVariante,
-              cantidad: item.cantidad,
-              precioUnitario: item.precioUnitario,
-              nombreProductoSnapshot: item.nombreProductoSnapshot,
-              skuSnapshot: item.skuSnapshot,
-              nombreAtributoPrincipalSnapshot: item.nombreAtributoPrincipalSnapshot,
-              valorAtributoPrincipalSnapshot: item.valorAtributoPrincipalSnapshot,
-            })),
+            create: itemsConPrecio,
           },
         },
       });
-
-      const descuentos = await Promise.all(
-        carrito.items.map(async (item) => {
-          const stockAnterior = item.variante.inventario?.stockActual ?? 0;
-          const resultado = await tx.inventario.updateMany({
-            where: {
-              idVariante: item.idVariante,
-              stockActual: { gte: item.cantidad },
-            },
-            data: {
-              stockActual: { decrement: item.cantidad },
-            },
-          });
-
-          if (resultado.count === 0) {
-            throw new AppError(
-              `Stock insuficiente para ${item.variante.sku} (transacción abortada)`,
-              400
-            );
-          }
-
-          return {
-            idVariante: item.idVariante,
-            cantidad: item.cantidad,
-            stockAnterior,
-            stockNuevo: stockAnterior - item.cantidad,
-          };
-        })
-      );
 
       await tx.movimientoInventario.createMany({
         data: descuentos.map((d) => ({
@@ -289,17 +244,17 @@ const TRANSICIONES_PERMITIDAS: Record<EstadoPedido, EstadoPedido[]> = {
 const devolverInventarioTx = async (
   tx: Prisma.TransactionClient,
   idPedido: number,
-  items: { idVariante: number; cantidad: number }[]
+  items: { idVariante: number; cantidad: number; cantidadBasePresentacion: number }[]
 ) => {
   const cantidadesPorVariante = new Map<number, number>();
   for (const item of items) {
     cantidadesPorVariante.set(
       item.idVariante,
-      (cantidadesPorVariante.get(item.idVariante) ?? 0) + item.cantidad
+      (cantidadesPorVariante.get(item.idVariante) ?? 0) + item.cantidad * item.cantidadBasePresentacion
     );
   }
 
-  for (const [idVariante, cantidad] of cantidadesPorVariante) {
+  for (const [idVariante, cantidad] of [...cantidadesPorVariante].sort((a,b) => a[0]-b[0])) {
     const actualizado = await tx.inventario.update({
       where: { idVariante },
       data: { stockActual: { increment: cantidad } },
@@ -328,7 +283,7 @@ export const cambiarEstado = async (idPedido: number, estado: EstadoPedido) => {
         select: {
           idPedido: true,
           estado: true,
-          items: { select: { idVariante: true, cantidad: true } },
+          items: { select: { idVariante: true, cantidad: true, cantidadBasePresentacion: true } },
         },
       });
 

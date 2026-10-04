@@ -177,11 +177,13 @@ model Producto {
   fechaActualizacion  DateTime       @default(now()) @updatedAt @map("fecha_actualizacion")
   fechaPublicacion    DateTime?      @map("fecha_publicacion")
 
-  categoria         Categoria          @relation(fields: [idCategoria], references: [idCategoria])
-  atributoPrincipal Atributo?          @relation("AtributoPrincipalProducto", fields: [idAtributoPrincipal], references: [idAtributo], onDelete: SetNull)
+  categoria         Categoria           @relation(fields: [idCategoria], references: [idCategoria])
+  atributoPrincipal Atributo?           @relation("AtributoPrincipalProducto", fields: [idAtributoPrincipal], references: [idAtributo], onDelete: SetNull)
   imagenes          ImagenProducto[]
   variantes         ProductoVariante[]
   listaPrecios      ListaPrecio[]
+  presentaciones    PresentacionVenta[]
+  perfilesPrecio    PerfilPrecio[]
 
   @@index([idCategoria])
   @@index([idAtributoPrincipal])
@@ -220,16 +222,20 @@ model ProductoVariante {
   idMarca           Int?           @map("id_marca")
   idUnidad          Int?           @map("id_unidad")
   idListaPrecio     Int?           @map("id_lista_precio")
+  // TRANSICIÓN: null usará el perfil principal del producto en el runtime futuro.
+  idPerfilPrecio    Int?           @map("id_perfil_precio")
   cantidadContenido Decimal        @default(1.00) @map("cantidad_contenido") @db.Decimal(10, 2)
   sku               String         @unique @db.VarChar(50)
   codigoBarras      String?        @unique @map("codigo_barras") @db.VarChar(100)
   peso              Decimal?       @db.Decimal(10, 2)
   estado            EstadoGenerico @default(Activo)
 
-  producto    Producto      @relation(fields: [idProducto], references: [idProducto], onDelete: Cascade)
-  marca       Marca?        @relation(fields: [idMarca], references: [idMarca])
-  unidad      UnidadMedida? @relation(fields: [idUnidad], references: [idUnidad])
-  listaPrecio ListaPrecio?  @relation(fields: [idListaPrecio], references: [idListaPrecio], onDelete: SetNull)
+  producto     Producto      @relation(fields: [idProducto], references: [idProducto], onDelete: Cascade)
+  marca        Marca?        @relation(fields: [idMarca], references: [idMarca])
+  unidad       UnidadMedida? @relation(fields: [idUnidad], references: [idUnidad])
+  listaPrecio  ListaPrecio?  @relation(fields: [idListaPrecio], references: [idListaPrecio], onDelete: SetNull)
+  // El servicio futuro debe verificar que el perfil pertenezca al mismo producto.
+  perfilPrecio PerfilPrecio? @relation(fields: [idPerfilPrecio], references: [idPerfilPrecio], onDelete: SetNull)
 
   imagenes              ImagenVariante[]
   inventario            Inventario?
@@ -241,7 +247,54 @@ model ProductoVariante {
 
   @@index([idProducto])
   @@index([idListaPrecio])
+  @@index([idPerfilPrecio])
   @@map("producto_variante")
+}
+
+// ============================================
+// PRESENTACIÓN DE VENTA / PERFIL DE PRECIO
+// ============================================
+model PresentacionVenta {
+  idPresentacion     Int      @id @default(autoincrement()) @map("id_presentacion")
+  idProducto         Int      @map("id_producto")
+  nombre             String   @db.VarChar(100)
+  // Unidades físicas base consumidas por una presentación; CHECK > 0 en SQL.
+  cantidadBase       Int      @map("cantidad_base")
+  principal          Boolean  @default(false)
+  activo             Boolean  @default(true)
+  orden              Int      @default(0)
+  fechaCreacion      DateTime @default(now()) @map("fecha_creacion")
+  fechaActualizacion DateTime @default(now()) @updatedAt @map("fecha_actualizacion")
+
+  producto     Producto         @relation(fields: [idProducto], references: [idProducto], onDelete: Cascade)
+  listasPrecio ListaPrecio[]
+  carritoItems CarritoDetalle[]
+  pedidoItems  PedidoDetalle[]
+
+  @@unique([idProducto, nombre])
+  @@index([idProducto, activo, orden])
+  // SQL: como máximo una presentación principal activa por producto.
+  @@map("presentacion_venta")
+}
+
+model PerfilPrecio {
+  idPerfilPrecio     Int      @id @default(autoincrement()) @map("id_perfil_precio")
+  idProducto         Int      @map("id_producto")
+  nombre             String   @db.VarChar(100)
+  principal          Boolean  @default(false)
+  activo             Boolean  @default(true)
+  orden              Int      @default(0)
+  fechaCreacion      DateTime @default(now()) @map("fecha_creacion")
+  fechaActualizacion DateTime @default(now()) @updatedAt @map("fecha_actualizacion")
+
+  producto     Producto           @relation(fields: [idProducto], references: [idProducto], onDelete: Cascade)
+  listasPrecio ListaPrecio[]
+  variantes    ProductoVariante[]
+
+  @@unique([idProducto, nombre])
+  @@index([idProducto, activo, orden])
+  // SQL: como máximo un perfil principal activo por producto.
+  @@map("perfil_precio")
 }
 
 // ============================================
@@ -250,17 +303,26 @@ model ProductoVariante {
 model ListaPrecio {
   idListaPrecio      Int      @id @default(autoincrement()) @map("id_lista_precio")
   idProducto         Int      @map("id_producto")
+  // TRANSICIÓN: nullable para conservar intactas las listas legacy.
+  idPresentacion     Int?     @map("id_presentacion")
+  idPerfilPrecio     Int?     @map("id_perfil_precio")
   nombre             String   @db.VarChar(100)
   principal          Boolean  @default(false)
   activo             Boolean  @default(true)
   fechaCreacion      DateTime @default(now()) @map("fecha_creacion")
   fechaActualizacion DateTime @default(now()) @updatedAt @map("fecha_actualizacion")
 
-  producto  Producto              @relation(fields: [idProducto], references: [idProducto], onDelete: Cascade)
-  reglas    ReglaPrecioCantidad[]
-  variantes ProductoVariante[]
+  producto     Producto              @relation(fields: [idProducto], references: [idProducto], onDelete: Cascade)
+  reglas       ReglaPrecioCantidad[]
+  variantes    ProductoVariante[]
+  // El servicio futuro debe verificar que presentación y perfil pertenezcan a idProducto.
+  presentacion PresentacionVenta?    @relation(fields: [idPresentacion], references: [idPresentacion], onDelete: SetNull)
+  perfilPrecio PerfilPrecio?         @relation(fields: [idPerfilPrecio], references: [idPerfilPrecio], onDelete: SetNull)
 
   @@index([idProducto, activo], map: "lista_precio_producto_activo_idx")
+  @@index([idPresentacion])
+  @@index([idPerfilPrecio])
+  // SQL: una lista activa por producto/presentación/perfil cuando ambas FK no son null.
   @@map("lista_precio")
 }
 
@@ -302,6 +364,7 @@ model ImagenVariante {
 // ============================================
 // INVENTARIO (1 a 1 con variante)
 // ============================================
+// Stocks y umbrales expresados exclusivamente en unidades físicas base.
 model Inventario {
   idInventario Int  @id @default(autoincrement()) @map("id_inventario")
   idVariante   Int  @unique @map("id_variante")
@@ -323,6 +386,7 @@ enum TipoMovimiento {
   Ajuste
 }
 
+// Cantidad, stockAnterior y stockNuevo expresados en unidades físicas base.
 model MovimientoInventario {
   idMovimiento  Int            @id @default(autoincrement()) @map("id_movimiento")
   idVariante    Int            @map("id_variante")
@@ -385,15 +449,20 @@ model Carrito {
 }
 
 model CarritoDetalle {
-  idDetalle  Int @id @default(autoincrement()) @map("id_detalle")
-  idCarrito  Int @map("id_carrito")
-  idVariante Int @map("id_variante")
-  cantidad   Int @default(1)
+  idDetalle      Int @id @default(autoincrement()) @map("id_detalle")
+  idCarrito      Int @map("id_carrito")
+  idVariante     Int @map("id_variante")
+  idPresentacion Int @map("id_presentacion")
+  cantidad       Int @default(1)
 
   carrito  Carrito          @relation(fields: [idCarrito], references: [idCarrito], onDelete: Cascade)
   variante ProductoVariante @relation(fields: [idVariante], references: [idVariante])
 
-  @@unique([idCarrito, idVariante])
+  presentacion PresentacionVenta @relation(fields: [idPresentacion], references: [idPresentacion], onDelete: Restrict)
+
+  @@unique([idCarrito, idVariante, idPresentacion])
+  @@index([idVariante])
+  @@index([idPresentacion])
   @@map("carrito_detalle")
 }
 
@@ -477,13 +546,19 @@ model PedidoDetalle {
   cantidad       Int
   precioUnitario Decimal @map("precio_unitario") @db.Decimal(10, 2)
 
-  nombreProductoSnapshot            String? @map("nombre_producto_snapshot") @db.VarChar(150)
-  skuSnapshot                       String? @map("sku_snapshot") @db.VarChar(50)
-  nombreAtributoPrincipalSnapshot   String? @map("nombre_atributo_principal_snapshot") @db.VarChar(100)
-  valorAtributoPrincipalSnapshot    String? @map("valor_atributo_principal_snapshot") @db.VarChar(100)
+  nombreProductoSnapshot          String? @map("nombre_producto_snapshot") @db.VarChar(150)
+  skuSnapshot                     String? @map("sku_snapshot") @db.VarChar(50)
+  nombreAtributoPrincipalSnapshot String? @map("nombre_atributo_principal_snapshot") @db.VarChar(100)
+  valorAtributoPrincipalSnapshot  String? @map("valor_atributo_principal_snapshot") @db.VarChar(100)
+
+  idPresentacion           Int?               @map("id_presentacion")
+  presentacionNombre       String             @map("presentacion_nombre") @db.VarChar(100)
+  cantidadBasePresentacion Int                @map("cantidad_base_presentacion")
+  presentacion             PresentacionVenta? @relation(fields: [idPresentacion], references: [idPresentacion], onDelete: SetNull)
 
   pedido   Pedido           @relation(fields: [idPedido], references: [idPedido], onDelete: Cascade)
   variante ProductoVariante @relation(fields: [idVariante], references: [idVariante])
 
+  @@index([idPresentacion])
   @@map("pedido_detalle")
 }

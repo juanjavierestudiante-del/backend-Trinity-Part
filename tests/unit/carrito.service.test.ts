@@ -8,44 +8,16 @@ const repository = vi.hoisted(() => ({
   eliminarItemPropio: vi.fn(),
   contarItems: vi.fn(),
 }));
-const pricing = vi.hoisted(() => ({ resolverPreciosAgrupados: vi.fn() }));
+const pricing = vi.hoisted(() => ({ resolverVentasAgrupadas: vi.fn(), resolverContextoComercialBase: vi.fn() }));
 
 vi.mock('../../src/repositories/carrito.repository.js', () => repository);
-vi.mock('../../src/services/precio-cantidad.service.js', () => pricing);
+vi.mock('../../src/services/resolucion-comercial.service.js', () => pricing);
 
 const carritoService = await import('../../src/services/carrito.service.js');
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => { vi.clearAllMocks(); pricing.resolverContextoComercialBase.mockResolvedValue({ presentacion: { idPresentacion: 1 } }); });
 
 describe('operaciones especializadas de carrito', () => {
-  it('resuelve precios agrupados dinámicamente y nunca recibe precio legacy del repositorio', async () => {
-    repository.obtenerVistaPorUsuario.mockResolvedValue({
-      idCarrito: 3,
-      totalItems: 2,
-      items: [
-        { idDetalle: 10, idVariante: 4, cantidad: 3, stock: 10, sku: 'ROJO', producto: { idProducto: 3, nombre: 'Globo', slug: 'globo', imagen: null } },
-        { idDetalle: 11, idVariante: 5, cantidad: 2, stock: 10, sku: 'VERDE', producto: { idProducto: 3, nombre: 'Globo', slug: 'globo', imagen: null } },
-      ],
-    });
-    pricing.resolverPreciosAgrupados.mockResolvedValue({
-      grupos: [{ idProducto: 3, idListaPrecio: 1, cantidadTotal: 5, cantidadMinimaAplicada: 5, precioPorPresentacion: new Prisma.Decimal('18'), subtotalGrupo: new Prisma.Decimal('90') }],
-      lineas: [
-        { idVariante: 4, idListaPrecioEfectiva: 1, precioPorPresentacion: new Prisma.Decimal('18'), subtotal: new Prisma.Decimal('54') },
-        { idVariante: 5, idListaPrecioEfectiva: 1, precioPorPresentacion: new Prisma.Decimal('18'), subtotal: new Prisma.Decimal('36') },
-      ],
-      total: new Prisma.Decimal('90'),
-    });
-
-    await expect(carritoService.obtenerCarrito(7)).resolves.toMatchObject({
-      total: '90.00',
-      items: [
-        { idVariante: 4, idListaPrecioEfectiva: 1, precioPorPresentacion: '18.00', subtotal: '54.00' },
-        { idVariante: 5, idListaPrecioEfectiva: 1, precioPorPresentacion: '18.00', subtotal: '36.00' },
-      ],
-    });
-    expect(pricing.resolverPreciosAgrupados).toHaveBeenCalledWith([{ idVariante: 4, cantidad: 3 }, { idVariante: 5, cantidad: 2 }]);
-  });
-
   it.each([
     ['actualizarItem', () => carritoService.actualizarItem(7, 12, 3)],
     ['eliminarItem', () => carritoService.eliminarItem(7, 12)],
@@ -77,11 +49,34 @@ describe('operaciones especializadas de carrito', () => {
     repository.agregarItemAtomico.mockResolvedValue([{ idDetalle: 12, idCarrito: 3, idVariante: 4, cantidad: 4 }]);
 
     await expect(carritoService.agregarItem(7, { idVariante: 4, cantidad: 2 })).resolves.toMatchObject({ cantidad: 4 });
-    expect(repository.agregarItemAtomico).toHaveBeenCalledWith(7, 4, 2);
+    expect(repository.agregarItemAtomico).toHaveBeenCalledWith(7, 4, 1, 2);
   });
 
   it('devuelve 400 si la operación condicional detecta stock insuficiente', async () => {
     repository.actualizarCantidadPropia.mockResolvedValue({ estado: 'STOCK_INSUFICIENTE' });
     await expect(carritoService.actualizarItem(7, 12, 4)).rejects.toMatchObject({ statusCode: 400 });
+  });
+});
+
+describe('contrato comercial del carrito', () => {
+  it('almacena la presentación explícita resuelta', async () => {
+    pricing.resolverContextoComercialBase.mockResolvedValue({ presentacion: { idPresentacion: 8 } });
+    repository.agregarItemAtomico.mockResolvedValue([{ idDetalle: 1, idPresentacion: 8 }]);
+    await carritoService.agregarItem(7, { idVariante: 4, idPresentacion: 8, cantidad: 3 });
+    expect(pricing.resolverContextoComercialBase).toHaveBeenCalledWith(4, 8);
+    expect(repository.agregarItemAtomico).toHaveBeenCalledWith(7, 4, 8, 3);
+  });
+  it.each(['presentación ajena', 'presentación inactiva'])('no persiste %s si el resolver rechaza', async (mensaje) => {
+    pricing.resolverContextoComercialBase.mockRejectedValue(new Error(mensaje));
+    await expect(carritoService.agregarItem(7, { idVariante: 4, idPresentacion: 8, cantidad: 1 })).rejects.toThrow(mensaje);
+    expect(repository.agregarItemAtomico).not.toHaveBeenCalled();
+  });
+  it('devuelve presentación, consumo base y stock comprable sin perder campos anteriores', async () => {
+    repository.obtenerVistaPorUsuario.mockResolvedValue({ idCarrito: 3, totalItems: 1, items: [{ idDetalle: 10, idVariante: 4, idPresentacion: 2, cantidad: 3, stock: 200, sku: 'ROJO', producto: { idProducto: 3, nombre: 'Globo', slug: 'globo', imagen: null } }] });
+    const r={ idProducto: 3, idVariante: 4, presentacion: { idPresentacion: 2, nombre: 'Pack x50', cantidadBase: 50 }, perfilPrecio: { idPerfilPrecio: 1 }, listaPrecio: { idListaPrecio: 1 }, reglaPrecio: { cantidadMinima: 1 }, cantidadPresentaciones: 3, cantidadBaseTotal: 150, precioPorPresentacion: new Prisma.Decimal('32'), subtotal: new Prisma.Decimal('96') };
+    pricing.resolverVentasAgrupadas.mockResolvedValue({ lineas: [r], grupos: [{ ...r, indices: [0] }], total: new Prisma.Decimal('96') });
+    const result=await carritoService.obtenerCarrito(7);
+    expect(result).toMatchObject({ total: '96.00', items: [{ idDetalle: 10, sku: 'ROJO', stock: 4, stockBase: 200, cantidadBaseTotal: 150, presentacion: { nombre: 'Pack x50' }, subtotal: '96.00' }] });
+    expect(pricing.resolverVentasAgrupadas).toHaveBeenCalledWith([{ idDetalle: 10, idVariante: 4, idPresentacion: 2, cantidad: 3, stock: 200, sku: 'ROJO', producto: { idProducto: 3, nombre: 'Globo', slug: 'globo', imagen: null } }]);
   });
 });

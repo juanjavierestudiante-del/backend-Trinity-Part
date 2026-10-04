@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Prisma } from '@prisma/client';
 
-const mocks = vi.hoisted(() => ({ transaction: vi.fn(), resolverPreciosAgrupados: vi.fn() }));
+const mocks = vi.hoisted(() => ({ transaction: vi.fn(), resolverVentasAgrupadas: vi.fn() }));
 
 vi.mock('../../src/config/prisma.js', () => ({ default: { $transaction: mocks.transaction } }));
 vi.mock('../../src/repositories/pedido.repository.js', () => ({}));
-vi.mock('../../src/services/precio-cantidad.service.js', () => ({ resolverPreciosAgrupados: mocks.resolverPreciosAgrupados }));
+vi.mock('../../src/services/resolucion-comercial.service.js', () => ({ resolverVentasAgrupadas: mocks.resolverVentasAgrupadas }));
 
 const pedidoService = await import('../../src/services/pedido.service.js');
 const { crearPedidoSchema } = await import('../../src/validations/pedido.validation.js');
@@ -20,6 +20,7 @@ type Escenario = {
 const crearEscenario = ({ precio = '200', punto = null, configuracion, variante }: Escenario = {}) => {
   const pedidoCreate = vi.fn(async ({ data }) => ({ idPedido: 77, ...data }));
   const tx = {
+    $queryRaw: vi.fn().mockResolvedValue([]),
     carrito: {
       findUnique: vi.fn().mockResolvedValue({
         idCarrito: 12,
@@ -38,13 +39,13 @@ const crearEscenario = ({ precio = '200', punto = null, configuracion, variante 
       }),
     },
     pedido: { create: pedidoCreate },
-    inventario: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+    inventario: { updateMany: vi.fn().mockResolvedValue({ count: 1 }), findUniqueOrThrow: vi.fn().mockResolvedValue({ stockActual: 9 }) },
     movimientoInventario: { createMany: vi.fn().mockResolvedValue({ count: 1 }) },
     carritoDetalle: { deleteMany: vi.fn().mockResolvedValue({ count: 1 }) },
   };
   mocks.transaction.mockImplementation(async (callback: (client: typeof tx) => unknown) => callback(tx));
-  mocks.resolverPreciosAgrupados.mockResolvedValue({
-    lineas: [{ idVariante: 9, precioPorPresentacion: new Prisma.Decimal(precio) }],
+  mocks.resolverVentasAgrupadas.mockResolvedValue({
+    lineas: [{ idVariante: 9, presentacion: { idPresentacion: 1, nombre: 'Unidad', cantidadBase: 1 }, cantidadBaseTotal: 1, precioPorPresentacion: new Prisma.Decimal(precio) }],
     total: new Prisma.Decimal(precio),
   });
   return { tx, pedidoCreate };

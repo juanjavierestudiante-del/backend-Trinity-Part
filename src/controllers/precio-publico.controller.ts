@@ -1,13 +1,13 @@
 import type { Request, Response } from 'express';
 import { asyncHandler, AppError } from '../utils/helpers.js';
-import { resolverPreciosAgrupados } from '../services/precio-cantidad.service.js';
-import { ErrorPrecioCantidad, type ResultadoPreciosAgrupados } from '../types/precio-cantidad.types.js';
+import { resolverVentasAgrupadas } from '../services/resolucion-comercial.service.js';
+import { ErrorPrecioCantidad } from '../types/precio-cantidad.types.js';
 
 export const previsualizar = asyncHandler(async (req: Request, res: Response) => {
   const idProducto = Number(req.params.idProducto);
-  let resultado: ResultadoPreciosAgrupados;
+  let resultado: Awaited<ReturnType<typeof resolverVentasAgrupadas>>;
   try {
-    resultado = await resolverPreciosAgrupados(req.body.lineas);
+    resultado = await resolverVentasAgrupadas(req.body.lineas);
   } catch (error) {
     if (error instanceof ErrorPrecioCantidad) {
       throw new AppError('No se pudo calcular el precio para la cantidad solicitada', 409);
@@ -20,18 +20,19 @@ export const previsualizar = asyncHandler(async (req: Request, res: Response) =>
   res.json({
     grupos: resultado.grupos.map((grupo) => ({
       idProducto: grupo.idProducto,
-      idListaPrecio: grupo.idListaPrecio,
-      cantidadTotal: grupo.cantidadTotal,
-      idReglaPrecio: grupo.idReglaPrecio,
-      cantidadMinimaAplicada: grupo.cantidadMinimaAplicada,
+      idListaPrecio: grupo.listaPrecio.idListaPrecio,
+      cantidadTotal: grupo.cantidadPresentaciones,
+      idReglaPrecio: grupo.reglaPrecio.idReglaPrecio,
+      cantidadMinimaAplicada: grupo.reglaPrecio.cantidadMinima,
       precioPorPresentacion: grupo.precioPorPresentacion.toFixed(2),
-      subtotalGrupo: grupo.subtotalGrupo.toFixed(2),
+      subtotalGrupo: grupo.subtotal.toFixed(2),
     })),
     lineas: resultado.lineas.map((linea) => ({
       idVariante: linea.idVariante,
-      cantidad: linea.cantidad,
-      idListaPrecioEfectiva: linea.idListaPrecioEfectiva,
-      cantidadMinimaAplicada: linea.cantidadMinimaAplicada,
+      idPresentacion: linea.presentacion.idPresentacion,
+      cantidad: linea.cantidadPresentaciones,
+      idListaPrecioEfectiva: linea.listaPrecio.idListaPrecio,
+      cantidadMinimaAplicada: linea.reglaPrecio.cantidadMinima,
       precioPorPresentacion: linea.precioPorPresentacion.toFixed(2),
       subtotal: linea.subtotal.toFixed(2),
     })),

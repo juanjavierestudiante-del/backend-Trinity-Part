@@ -30,7 +30,7 @@ const crearEscenario = ({
     pedido: {
       findUnique: vi.fn().mockImplementation(({ select }: any) => {
         if (select?.items) {
-          return Promise.resolve({ idPedido: 10, estado: estadoInicial, items });
+          return Promise.resolve({ idPedido: 10, estado: estadoInicial, items: items.map(item => ({ cantidadBasePresentacion: 1, ...item })) });
         }
         return Promise.resolve({ estado: persistido ?? estadoInicial });
       }),

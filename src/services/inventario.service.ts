@@ -10,10 +10,21 @@ interface ContextoUsuario {
   motivo?: string | null;
 }
 
-export const listar = (page = 1, limit = 20) =>
-  inventarioRepository.findTodos(page, limit);
+type FilaAdmin = Awaited<ReturnType<typeof inventarioRepository.findTodos>>['items'][number];
 
-export const listarAlertas = () => inventarioRepository.findBajoStock();
+const conDisponibilidad = (fila: FilaAdmin) => ({
+  ...fila,
+  presentaciones: fila.presentaciones.map(p => ({
+    ...p, disponible: Math.floor(fila.stockActual / p.cantidadBase),
+  })),
+});
+
+export const listar = async (page = 1, limit = 20) => {
+  const resultado = await inventarioRepository.findTodos(page, limit);
+  return { ...resultado, items: resultado.items.map(conDisponibilidad) };
+};
+
+export const listarAlertas = async () => (await inventarioRepository.findBajoStock()).map(conDisponibilidad);
 
 export const obtenerPorVariante = async (idVariante: number | string) => {
   const inventario = await inventarioRepository.findByVariante(idVariante);

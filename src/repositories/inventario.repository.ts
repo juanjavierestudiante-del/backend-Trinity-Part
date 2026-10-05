@@ -14,6 +14,14 @@ interface ContextoMovimiento {
   motivo?: string | null;
 }
 
+const MAX_STOCK = 2147483647;
+
+const bloquearInventario = async (tx: Prisma.TransactionClient, id: number) => {
+  const variantes = await tx.$queryRaw<Array<{ id_variante: number }>>`SELECT id_variante FROM producto_variante WHERE id_variante=${id} FOR NO KEY UPDATE`;
+  if (!variantes.length) throw new AppError('Variante no encontrada', 404);
+  await tx.$queryRaw`SELECT id_inventario FROM inventario WHERE id_variante=${id} FOR UPDATE`;
+};
+
 const resolverMotivo = (ctx: ContextoMovimiento) =>
   ctx.motivo?.trim() || 'Ajuste manual desde admin';
 
@@ -27,7 +35,12 @@ export const upsertConMovimiento = async (
   const id = Number(idVariante);
 
   return prisma.$transaction(async (tx) => {
+    await bloquearInventario(tx, id);
     const existente = await tx.inventario.findUnique({ where: { idVariante: id } });
+
+    const minimo = datos.stockMinimo ?? existente?.stockMinimo ?? 0;
+    const maximo = datos.stockMaximo !== undefined ? datos.stockMaximo : existente?.stockMaximo;
+    if (maximo != null && maximo < minimo) throw new AppError('El máximo físico debe ser mayor o igual al mínimo', 400);
 
     let inventario;
     let stockAnterior: number;
@@ -58,8 +71,8 @@ export const upsertConMovimiento = async (
       await tx.movimientoInventario.create({
         data: {
           idVariante: id,
-          tipo: 'Ajuste',
-          cantidad: inventario.stockActual - stockAnterior,
+          tipo: inventario.stockActual > stockAnterior ? 'Entrada' : 'Salida',
+          cantidad: Math.abs(inventario.stockActual - stockAnterior),
           stockAnterior,
           stockNuevo: inventario.stockActual,
           motivo: resolverMotivo(ctx),
@@ -82,9 +95,14 @@ export const ajustarConMovimiento = async (
   const id = Number(idVariante);
 
   return prisma.$transaction(async (tx) => {
+    await bloquearInventario(tx, id);
     const actual = await tx.inventario.findUnique({ where: { idVariante: id } });
     if (!actual) {
       throw new AppError('Inventario no encontrado para esta variante', 404);
+    }
+
+    if (cantidad > 0 && actual.stockActual > MAX_STOCK - cantidad) {
+      throw new AppError('El stock físico excede el máximo permitido', 400);
     }
 
     if (cantidad < 0) {
@@ -108,8 +126,8 @@ export const ajustarConMovimiento = async (
       await tx.movimientoInventario.create({
         data: {
           idVariante: id,
-          tipo: 'Ajuste',
-          cantidad,
+          tipo: cantidad > 0 ? 'Entrada' : 'Salida',
+          cantidad: Math.abs(cantidad),
           stockAnterior: actualizado.stockActual - cantidad,
           stockNuevo: actualizado.stockActual,
           motivo: resolverMotivo(ctx),
@@ -122,101 +140,57 @@ export const ajustarConMovimiento = async (
   });
 };
 
-export interface FilaInventario {
-  idProducto: number;
-  producto: string;
-  idVariante: number;
-  sku: string;
-  marca: string | null;
-  unidad: string | null;
-  estado: string;
-  stockActual: number;
-  stockMinimo: number;
-  stockMaximo: number | null;
-  tieneRegistro: boolean;
-}
+const includeAdmin = {
+  producto: { select: {
+    idProducto: true, nombre: true, idAtributoPrincipal: true,
+    atributoPrincipal: { select: { nombre: true } },
+    presentaciones: { where: { activo: true }, orderBy: [{ orden: 'asc' }, { idPresentacion: 'asc' }],
+      select: { idPresentacion: true, nombre: true, cantidadBase: true, principal: true } },
+  } },
+  varianteAtributo: { include: { valorAtributo: { select: { idAtributo: true, valor: true } } } },
+  marca: { select: { nombre: true } },
+  unidad: { select: { abreviatura: true } },
+  inventario: true,
+} satisfies Prisma.ProductoVarianteInclude;
 
-// Listado global: todas las variantes con su inventario (sin registro → stocks en 0).
-export const findTodos = async (
-  page = 1,
-  limit = 20
-): Promise<{ items: FilaInventario[]; total: number }> => {
+type VarianteAdmin = Prisma.ProductoVarianteGetPayload<{ include: typeof includeAdmin }>;
+
+const mapearFila = (v: VarianteAdmin) => {
+  const valor = v.varianteAtributo.find(a => a.valorAtributo.idAtributo === v.producto.idAtributoPrincipal)?.valorAtributo.valor;
+  const inventario = {
+    stockActual: v.inventario?.stockActual ?? 0,
+    stockMinimo: v.inventario?.stockMinimo ?? 0,
+    stockMaximo: v.inventario?.stockMaximo ?? null,
+  };
+  return {
+    idProducto: v.idProducto, producto: v.producto.nombre,
+    productoInfo: { idProducto: v.idProducto, nombre: v.producto.nombre },
+    idVariante: v.idVariante, sku: v.sku, marca: v.marca?.nombre ?? null,
+    unidad: v.unidad?.abreviatura ?? null, estado: v.estado,
+    atributoPrincipal: v.producto.atributoPrincipal ? { nombre: v.producto.atributoPrincipal.nombre, valor: valor ?? null } : null,
+    inventario, ...inventario, tieneRegistro: !!v.inventario,
+    presentaciones: v.producto.presentaciones,
+  };
+};
+
+export const findTodos = async (page = 1, limit = 20) => {
   const [variantes, total] = await prisma.$transaction([
     prisma.productoVariante.findMany({
       orderBy: [{ producto: { nombre: 'asc' } }, { sku: 'asc' }],
-      include: {
-        producto: { select: { nombre: true } },
-        marca: { select: { nombre: true } },
-        unidad: { select: { abreviatura: true } },
-        inventario: true,
-      },
-      skip: (page - 1) * limit,
-      take: limit,
+      include: includeAdmin, skip: (page - 1) * limit, take: limit,
     }),
     prisma.productoVariante.count(),
   ]);
-
-  const items = variantes.map((v) => ({
-    idProducto: v.idProducto,
-    producto: v.producto.nombre,
-    idVariante: v.idVariante,
-    sku: v.sku,
-    marca: v.marca?.nombre ?? null,
-    unidad: v.unidad?.abreviatura ?? null,
-    estado: v.estado,
-    stockActual: v.inventario?.stockActual ?? 0,
-    stockMinimo: v.inventario?.stockMinimo ?? 0,
-    stockMaximo: v.inventario?.stockMaximo ?? null,
-    tieneRegistro: !!v.inventario,
-  }));
-
-  return { items, total };
+  return { items: variantes.map(mapearFila), total };
 };
 
-export interface FilaBajoStock {
-  idProducto: number;
-  producto: string;
-  idVariante: number;
-  sku: string;
-  marca: string | null;
-  unidad: string | null;
-  stockActual: number;
-  stockMinimo: number;
-  stockMaximo: number | null;
-  tieneRegistro: boolean;
-}
-
-// Alertas: variantes por debajo (o iguales) al mínimo, incluidas las que
-// no tienen registro de inventario (se tratan como stock 0).
-export const findBajoStock = async (): Promise<FilaBajoStock[]> => {
+export const findBajoStock = async () => {
   const variantes = await prisma.productoVariante.findMany({
-    where: {
-      OR: [
-        { inventario: null },
-        { inventario: { stockActual: { lte: prisma.inventario.fields.stockMinimo } } },
-      ],
-    },
-    include: {
-      producto: { select: { nombre: true } },
-      marca: { select: { nombre: true } },
-      unidad: { select: { abreviatura: true } },
-      inventario: true,
-    },
+    where: { OR: [{ inventario: null }, { inventario: { stockActual: { lte: prisma.inventario.fields.stockMinimo } } }] },
+    include: includeAdmin,
     orderBy: [{ inventario: { stockActual: 'asc' } }, { sku: 'asc' }],
   });
-
-  return variantes.map((v) => ({
-    idProducto: v.idProducto,
-    producto: v.producto.nombre,
-    idVariante: v.idVariante,
-    sku: v.sku,
-    marca: v.marca?.nombre ?? null,
-    unidad: v.unidad?.abreviatura ?? null,
-    stockActual: v.inventario?.stockActual ?? 0,
-    stockMinimo: v.inventario?.stockMinimo ?? 0,
-    stockMaximo: v.inventario?.stockMaximo ?? null,
-    tieneRegistro: !!v.inventario,
-  }));
+  return variantes.map(mapearFila);
 };
 
 export interface FilaMovimiento {

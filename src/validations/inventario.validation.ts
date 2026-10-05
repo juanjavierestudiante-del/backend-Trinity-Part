@@ -2,11 +2,16 @@
 
 import { z } from 'zod';
 
+const entero = () => z.preprocess(
+  valor => typeof valor === 'string' && valor.trim() !== '' ? Number(valor) : valor,
+  z.number().int().min(0).max(2147483647)
+);
+
 export const actualizarInventarioSchema = z
   .object({
-    stockActual: z.coerce.number().int().min(0).optional(),
-    stockMinimo: z.coerce.number().int().min(0).optional(),
-    stockMaximo: z.coerce.number().int().min(0).nullable().optional(),
+    stockActual: entero().optional(),
+    stockMinimo: entero().optional(),
+    stockMaximo: entero().nullable().optional(),
     motivo: z.string().max(255).optional(),
   })
   .refine(
@@ -25,9 +30,11 @@ export const actualizarInventarioSchema = z
   );
 
 export const ajustarInventarioSchema = z.object({
-  cantidad: z.coerce
+  cantidad: z
     .number()
     .int()
+    .min(-2147483647)
+    .max(2147483647)
     .refine((n) => n !== 0, { message: 'La cantidad debe ser distinta de 0' }),
   motivo: z.string().max(255).optional(),
 });

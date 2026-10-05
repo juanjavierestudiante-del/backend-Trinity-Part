@@ -26,6 +26,7 @@ const crearEscenario = ({
   persistido?: EstadoPedido;
   stockAntesPorVariante?: Map<number, number>;
 }) => {
+  let stockActual = 0;
   const tx: any = {
     pedido: {
       findUnique: vi.fn().mockImplementation(({ select }: any) => {
@@ -37,10 +38,11 @@ const crearEscenario = ({
       updateMany: vi.fn().mockResolvedValue({ count: gateCount }),
     },
     inventario: {
-      update: vi.fn().mockImplementation((args: any) => {
-        const stockActual = (stockAntesPorVariante.get(args.where.idVariante) ?? 0) + args.data.stockActual.increment;
-        return Promise.resolve({ stockActual });
+      updateMany: vi.fn().mockImplementation((args: any) => {
+        stockActual = (stockAntesPorVariante.get(args.where.idVariante) ?? 0) + args.data.stockActual.increment;
+        return Promise.resolve({ count: 1 });
       }),
+      findUniqueOrThrow: vi.fn().mockImplementation(() => Promise.resolve({ stockActual })),
     },
     movimientoInventario: { create: vi.fn().mockResolvedValue({ idMovimiento: 1 }) },
   };
@@ -62,7 +64,7 @@ describe('ciclo de vida del pedido (Fase 4)', () => {
       where: { idPedido: 10, estado: 'PENDIENTE' },
       data: { estado: 'CONFIRMADO' },
     });
-    expect(tx.inventario.update).not.toHaveBeenCalled();
+    expect(tx.inventario.updateMany).not.toHaveBeenCalled();
     expect(tx.movimientoInventario.create).not.toHaveBeenCalled();
     expect(resultado).toEqual({ idPedido: 10, estado: 'CONFIRMADO' });
   });
@@ -72,10 +74,9 @@ describe('ciclo de vida del pedido (Fase 4)', () => {
 
     await pedidoService.cambiarEstado(10, 'CANCELADO');
 
-    expect(tx.inventario.update).toHaveBeenCalledWith({
-      where: { idVariante: 5 },
+    expect(tx.inventario.updateMany).toHaveBeenCalledWith({
+      where: { idVariante: 5, stockActual: { lte: 2147483645 } },
       data: { stockActual: { increment: 2 } },
-      select: { stockActual: true },
     });
     expect(tx.movimientoInventario.create).toHaveBeenCalledTimes(1);
     expect(tx.movimientoInventario.create).toHaveBeenCalledWith({
@@ -100,7 +101,7 @@ describe('ciclo de vida del pedido (Fase 4)', () => {
       where: { idPedido: 10, estado: 'CONFIRMADO' },
       data: { estado: 'CANCELADO' },
     });
-    expect(tx.inventario.update).toHaveBeenCalledTimes(1);
+    expect(tx.inventario.updateMany).toHaveBeenCalledTimes(1);
     expect(tx.movimientoInventario.create).toHaveBeenCalledTimes(1);
   });
 
@@ -112,7 +113,7 @@ describe('ciclo de vida del pedido (Fase 4)', () => {
       message: 'No se puede cambiar un pedido CONFIRMADO a PENDIENTE.',
     });
     expect(tx.pedido.updateMany).not.toHaveBeenCalled();
-    expect(tx.inventario.update).not.toHaveBeenCalled();
+    expect(tx.inventario.updateMany).not.toHaveBeenCalled();
     expect(tx.movimientoInventario.create).not.toHaveBeenCalled();
   });
 
@@ -124,7 +125,7 @@ describe('ciclo de vida del pedido (Fase 4)', () => {
       message: 'No se puede cambiar un pedido CANCELADO a CONFIRMADO.',
     });
     expect(tx.pedido.updateMany).not.toHaveBeenCalled();
-    expect(tx.inventario.update).not.toHaveBeenCalled();
+    expect(tx.inventario.updateMany).not.toHaveBeenCalled();
   });
 
   it('CASO F: CANCELADO → PENDIENTE rechazado (409)', async () => {
@@ -143,7 +144,7 @@ describe('ciclo de vida del pedido (Fase 4)', () => {
     await pedidoService.cambiarEstado(10, 'CONFIRMADO');
 
     expect(tx.pedido.updateMany).not.toHaveBeenCalled();
-    expect(tx.inventario.update).not.toHaveBeenCalled();
+    expect(tx.inventario.updateMany).not.toHaveBeenCalled();
     expect(tx.movimientoInventario.create).not.toHaveBeenCalled();
   });
 
@@ -153,7 +154,7 @@ describe('ciclo de vida del pedido (Fase 4)', () => {
     await pedidoService.cambiarEstado(10, 'CANCELADO');
 
     expect(tx.pedido.updateMany).not.toHaveBeenCalled();
-    expect(tx.inventario.update).not.toHaveBeenCalled();
+    expect(tx.inventario.updateMany).not.toHaveBeenCalled();
     expect(tx.movimientoInventario.create).not.toHaveBeenCalled();
     expect(mocks.findByIdEnTx).toHaveBeenCalledTimes(1);
   });
@@ -161,12 +162,12 @@ describe('ciclo de vida del pedido (Fase 4)', () => {
   it('CASO H: doble cancelación consecutiva restaura el stock una sola vez', async () => {
     const primera = crearEscenario({ estadoInicial: 'PENDIENTE' });
     await pedidoService.cambiarEstado(10, 'CANCELADO');
-    expect(primera.inventario.update).toHaveBeenCalledTimes(1);
+    expect(primera.inventario.updateMany).toHaveBeenCalledTimes(1);
     expect(primera.movimientoInventario.create).toHaveBeenCalledTimes(1);
 
     const segunda = crearEscenario({ estadoInicial: 'CANCELADO' });
     await pedidoService.cambiarEstado(10, 'CANCELADO');
-    expect(segunda.inventario.update).not.toHaveBeenCalled();
+    expect(segunda.inventario.updateMany).not.toHaveBeenCalled();
     expect(segunda.movimientoInventario.create).not.toHaveBeenCalled();
     expect(segunda.pedido.updateMany).not.toHaveBeenCalled();
   });
@@ -177,7 +178,7 @@ describe('ciclo de vida del pedido (Fase 4)', () => {
     await expect(pedidoService.cambiarEstado(10, 'CANCELADO')).resolves.toBeTruthy();
 
     expect(tx.pedido.updateMany).toHaveBeenCalledTimes(1);
-    expect(tx.inventario.update).not.toHaveBeenCalled();
+    expect(tx.inventario.updateMany).not.toHaveBeenCalled();
     expect(tx.movimientoInventario.create).not.toHaveBeenCalled();
   });
 
@@ -188,7 +189,7 @@ describe('ciclo de vida del pedido (Fase 4)', () => {
       statusCode: 409,
       message: 'El pedido fue modificado simultáneamente por otro usuario. Estado actual: CONFIRMADO.',
     });
-    expect(tx.inventario.update).not.toHaveBeenCalled();
+    expect(tx.inventario.updateMany).not.toHaveBeenCalled();
     expect(tx.movimientoInventario.create).not.toHaveBeenCalled();
   });
 
@@ -205,11 +206,10 @@ describe('ciclo de vida del pedido (Fase 4)', () => {
 
     await pedidoService.cambiarEstado(10, 'CANCELADO');
 
-    expect(tx.inventario.update).toHaveBeenCalledTimes(1);
-    expect(tx.inventario.update).toHaveBeenCalledWith({
-      where: { idVariante: 5 },
+    expect(tx.inventario.updateMany).toHaveBeenCalledTimes(1);
+    expect(tx.inventario.updateMany).toHaveBeenCalledWith({
+      where: { idVariante: 5, stockActual: { lte: 2147483642 } },
       data: { stockActual: { increment: 5 } },
-      select: { stockActual: true },
     });
     expect(tx.movimientoInventario.create).toHaveBeenCalledTimes(1);
     expect(tx.movimientoInventario.create).toHaveBeenCalledWith({

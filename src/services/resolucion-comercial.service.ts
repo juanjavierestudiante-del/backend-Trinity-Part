@@ -109,6 +109,39 @@ export const resolverVentasAgrupadas = async (lineas: LineaVentaSolicitada[], db
   return resolverVentasAgrupadasConContextos(lineas, contextos);
 };
 
+/** Sólo checkout, con carrito/variantes/presentaciones ya bloqueados por el coordinador.
+ * Descubre IDs; adquiere perfiles -> listas -> reglas; después lee reglas definitivas.
+ * Si la selección cambió mientras esperaba un lock, aborta en vez de usar IDs sin protección.
+ */
+export const resolverVentasAgrupadasParaCheckout = async (lineas: LineaVentaSolicitada[], db: Prisma.TransactionClient) => {
+  if (!lineas.length) return resolverVentasAgrupadasConContextos([], []);
+  for (const l of lineas) { validarId(l.idVariante); if (l.idPresentacion !== undefined) validarId(l.idPresentacion); validarCantidadPrecio(l.cantidad); }
+  const perfiles = await repository.obtenerIdsPerfilesEfectivos(lineas.map(l => l.idVariante), db);
+  const idsPerfiles = perfiles.flatMap(p => p.idPerfilPrecio === null ? [] : [p.idPerfilPrecio]);
+  await repository.bloquearPerfilesParaVenta(idsPerfiles, db);
+  const variantes = await repository.obtenerVariantesComerciales(lineas.map(l => l.idVariante), db);
+  const porId = new Map(variantes.map(v => [v.idVariante, v]));
+  const identidades = lineas.map(l => {
+    const v = porId.get(l.idVariante);
+    const i = resolverIdentidadComercial(v ? { ...v, producto: { ...v.producto,
+      presentaciones: v.producto.presentaciones.filter(p => l.idPresentacion === undefined ? p.principal && p.activo : p.idPresentacion === l.idPresentacion),
+    } } : null, l.idPresentacion);
+    if (!idsPerfiles.includes(i.perfilPrecio.idPerfilPrecio)) errorConfiguracion('el perfil cambió durante la resolución; reintenta la compra');
+    return i;
+  });
+  const iniciales = await repository.obtenerIdsListasComerciales(identidades, db);
+  const idsListas = iniciales.map(l => l.idListaPrecio);
+  await repository.bloquearListasParaVenta(idsListas, db);
+  await repository.bloquearReglasParaVenta(idsListas, db);
+  const listas = await repository.obtenerListasComercialesEnLote(identidades, db);
+  const contextos = identidades.map(i => {
+    const c = completarContexto(i, listas.filter(l => l.idProducto === i.idProducto && l.idPresentacion === i.presentacion.idPresentacion && l.idPerfilPrecio === i.perfilPrecio.idPerfilPrecio));
+    if (!idsListas.includes(c.listaPrecio.idListaPrecio)) errorConfiguracion('la lista cambió durante la resolución; reintenta la compra');
+    return c;
+  });
+  return resolverVentasAgrupadasConContextos(lineas, contextos);
+};
+
 export const resolverVentasAgrupadasConContextos = (lineas: LineaVentaSolicitada[], contextos: ContextoComercialBase[]) => {
   if (lineas.length !== contextos.length) errorConfiguracion('contextos incompletos');
   const grupos = new Map<string, { contexto: ContextoComercialBase; cantidad: number; indices: number[] }>();

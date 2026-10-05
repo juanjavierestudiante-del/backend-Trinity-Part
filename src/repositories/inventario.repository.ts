@@ -16,6 +16,21 @@ interface ContextoMovimiento {
 
 const MAX_STOCK = 2147483647;
 
+/** Condición e incremento en la misma sentencia: no hay carrera con otra reposición. */
+export const reponerInventarioSeguro = async (tx: Prisma.TransactionClient, idVariante: number, cantidad: number) => {
+  const fueraDeRango = () => new AppError('La reposición excede el límite permitido de inventario.', 409);
+  if (!Number.isSafeInteger(cantidad) || cantidad <= 0 || cantidad > MAX_STOCK) throw fueraDeRango();
+  const resultado = await tx.inventario.updateMany({
+    where: { idVariante, stockActual: { lte: MAX_STOCK - cantidad } },
+    data: { stockActual: { increment: cantidad } },
+  });
+  if (resultado.count !== 1) {
+    if (!await tx.inventario.findUnique({ where: { idVariante }, select: { idInventario: true } })) throw new AppError('Inventario no encontrado para esta variante', 404);
+    throw fueraDeRango();
+  }
+  return tx.inventario.findUniqueOrThrow({ where: { idVariante }, select: { stockActual: true } });
+};
+
 const bloquearInventario = async (tx: Prisma.TransactionClient, id: number) => {
   const variantes = await tx.$queryRaw<Array<{ id_variante: number }>>`SELECT id_variante FROM producto_variante WHERE id_variante=${id} FOR NO KEY UPDATE`;
   if (!variantes.length) throw new AppError('Variante no encontrada', 404);

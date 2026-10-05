@@ -4,8 +4,10 @@ import { AppError } from '../utils/helpers.js';
 import { EstadoPedido, MetodoEntrega, Prisma, type TipoPuntoEntrega } from '@prisma/client';
 import type { CrearPedidoInput } from '../validations/pedido.validation.js';
 import { normalizarTelefonoBolivia } from '../utils/auth.helpers.js';
-import { resolverVentasAgrupadas } from './resolucion-comercial.service.js';
+import { resolverVentasAgrupadasParaCheckout } from './resolucion-comercial.service.js';
 import { ErrorPrecioCantidad } from '../types/precio-cantidad.types.js';
+import { bloquearPresentacionesParaVenta, bloquearVariantesParaVenta } from '../repositories/resolucion-comercial.repository.js';
+import { reponerInventarioSeguro } from '../repositories/inventario.repository.js';
 
 const tipoEsperadoPorMetodo: Record<
   Exclude<MetodoEntrega, 'DELIVERY'>,
@@ -105,8 +107,10 @@ export const crear = async (idUsuario: number, input: CrearPedidoInput) => {
         throw new AppError('El carrito está vacío', 400);
       }
 
+      await bloquearVariantesParaVenta(carrito.items.map(item => item.idVariante), tx);
+      await bloquearPresentacionesParaVenta(carrito.items.map(item => item.idPresentacion), tx);
       let precios;
-      try { precios = await resolverVentasAgrupadas(carrito.items, tx); }
+      try { precios = await resolverVentasAgrupadasParaCheckout(carrito.items, tx); }
       catch (error) { if (error instanceof ErrorPrecioCantidad) throw new AppError('No se pudo resolver el precio actual de los productos del carrito', 409); throw error; }
       const itemsConPrecio = carrito.items.map((item, index) => {
         const r = precios.lineas[index];
@@ -255,11 +259,7 @@ const devolverInventarioTx = async (
   }
 
   for (const [idVariante, cantidad] of [...cantidadesPorVariante].sort((a,b) => a[0]-b[0])) {
-    const actualizado = await tx.inventario.update({
-      where: { idVariante },
-      data: { stockActual: { increment: cantidad } },
-      select: { stockActual: true },
-    });
+    const actualizado = await reponerInventarioSeguro(tx, idVariante, cantidad);
 
     await tx.movimientoInventario.create({
       data: {

@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import prisma from '../config/prisma.js';
 import type { ListaPrecioInput, ReglaPrecioCantidadInput } from '../validations/precio-cantidad.validation.js';
+import { bloquearListasParaEscrituraReglas } from './resolucion-comercial.repository.js';
 
 const seleccionRegla = { idReglaPrecio: true, nombre: true, cantidadMinima: true, precioPorPresentacion: true, principal: true, activo: true, orden: true } satisfies Prisma.ReglaPrecioCantidadSelect;
 const seleccionLista = { idListaPrecio: true, nombre: true, principal: true, activo: true, reglas: { select: seleccionRegla, orderBy: [{ orden: 'asc' }, { idReglaPrecio: 'asc' }] } } satisfies Prisma.ListaPrecioSelect;
@@ -9,6 +10,7 @@ type Tx = Prisma.TransactionClient;
 const datosRegla = (regla: ReglaPrecioCantidadInput) => ({ nombre: regla.nombre, cantidadMinima: regla.cantidadMinima, precioPorPresentacion: new Prisma.Decimal(regla.precioPorPresentacion), activo: regla.activo, orden: regla.orden });
 
 const sincronizarReglas = async (tx: Tx, idListaPrecio: number, reglas: ReglaPrecioCantidadInput[]) => {
+  await bloquearListasParaEscrituraReglas([idListaPrecio], tx);
   const actuales = await tx.reglaPrecioCantidad.findMany({ where: { idListaPrecio }, select: { idReglaPrecio: true } });
   const ids = new Set(actuales.map((regla) => regla.idReglaPrecio));
   if (reglas.some((regla) => regla.idReglaPrecio && !ids.has(regla.idReglaPrecio))) throw new Error('REGLA_NO_PERTENECE_A_LISTA');
@@ -47,6 +49,11 @@ export const obtenerConfiguracion = (idProducto: number) => prisma.producto.find
 
 export const guardarLista = (idProducto: number, idListaPrecio: number | null, input: ListaPrecioInput) => prisma.$transaction(async (tx) => {
   if (!await tx.producto.findUnique({ where: { idProducto }, select: { idProducto: true } })) return null;
+  // Si se cambia la principal, UPDATE toca todas las listas: bloquearlas antes en orden.
+  const ids = input.principal && input.activo
+    ? (await tx.listaPrecio.findMany({ where: { idProducto }, select: { idListaPrecio: true } })).map(l => l.idListaPrecio)
+    : idListaPrecio === null ? [] : [idListaPrecio];
+  await bloquearListasParaEscrituraReglas(ids, tx);
   const actual = idListaPrecio ? await tx.listaPrecio.findFirst({ where: { idListaPrecio, idProducto }, select: { idListaPrecio: true, principal: true, activo: true } }) : null;
   if (idListaPrecio && !actual) throw new Error('LISTA_NO_PERTENECE_AL_PRODUCTO');
   if (actual?.principal && actual.activo && (!input.principal || !input.activo)) {

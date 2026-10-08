@@ -4,7 +4,7 @@ import { Prisma } from '@prisma/client';
 const mocks = vi.hoisted(() => ({ transaction: vi.fn(), resolverVentasAgrupadasParaCheckout: vi.fn() }));
 
 vi.mock('../../src/config/prisma.js', () => ({ default: { $transaction: mocks.transaction } }));
-vi.mock('../../src/repositories/pedido.repository.js', () => ({}));
+vi.mock('../../src/repositories/pedido.repository.js', () => ({ obtenerCarritoParaCheckout: (_id: number, tx: {carrito:{findUnique:()=>Promise<unknown>}}) => tx.carrito.findUnique() }));
 vi.mock('../../src/services/resolucion-comercial.service.js', () => ({ resolverVentasAgrupadasParaCheckout: mocks.resolverVentasAgrupadasParaCheckout }));
 
 const pedidoService = await import('../../src/services/pedido.service.js');

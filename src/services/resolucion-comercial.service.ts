@@ -119,7 +119,7 @@ export const resolverVentasAgrupadasParaCheckout = async (lineas: LineaVentaSoli
   const perfiles = await repository.obtenerIdsPerfilesEfectivos(lineas.map(l => l.idVariante), db);
   const idsPerfiles = perfiles.flatMap(p => p.idPerfilPrecio === null ? [] : [p.idPerfilPrecio]);
   await repository.bloquearPerfilesParaVenta(idsPerfiles, db);
-  const variantes = await repository.obtenerVariantesComerciales(lineas.map(l => l.idVariante), db);
+  const variantes = await repository.obtenerVariantesComercialesParaCheckout(lineas.map(l => l.idVariante), db);
   const porId = new Map(variantes.map(v => [v.idVariante, v]));
   const identidades = lineas.map(l => {
     const v = porId.get(l.idVariante);
@@ -133,7 +133,7 @@ export const resolverVentasAgrupadasParaCheckout = async (lineas: LineaVentaSoli
   const idsListas = iniciales.map(l => l.idListaPrecio);
   await repository.bloquearListasParaVenta(idsListas, db);
   await repository.bloquearReglasParaVenta(idsListas, db);
-  const listas = await repository.obtenerListasComercialesEnLote(identidades, db);
+  const listas = await repository.obtenerListasComercialesParaCheckout(identidades, db);
   const contextos = identidades.map(i => {
     const c = completarContexto(i, listas.filter(l => l.idProducto === i.idProducto && l.idPresentacion === i.presentacion.idPresentacion && l.idPerfilPrecio === i.perfilPrecio.idPerfilPrecio));
     if (!idsListas.includes(c.listaPrecio.idListaPrecio)) errorConfiguracion('la lista cambió durante la resolución; reintenta la compra');

@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const m=vi.hoisted(()=>({transaction:vi.fn(), pricing:vi.fn(), read:vi.fn()}));
 vi.mock('../../src/config/prisma.js',()=>({default:{$transaction:m.transaction}}));
 vi.mock('../../src/services/resolucion-comercial.service.js',()=>({resolverVentasAgrupadasParaCheckout:m.pricing}));
-vi.mock('../../src/repositories/pedido.repository.js',()=>({findByIdEnTx:m.read}));
+vi.mock('../../src/repositories/pedido.repository.js',()=>({findByIdEnTx:m.read,obtenerCarritoParaCheckout:(_id: number,tx: {carrito:{findUnique:()=>Promise<unknown>}})=>tx.carrito.findUnique()}));
 const service=await import('../../src/services/pedido.service.js');
 const contacto={nombreContacto:'Cliente Prueba',telefonoContacto:'71234567',direccionEntrega:null};
 const setup=()=>{

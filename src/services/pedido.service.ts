@@ -66,42 +66,7 @@ export const crear = async (idUsuario: number, input: CrearPedidoInput) => {
   return prisma.$transaction(
     async (tx) => {
       await tx.$queryRaw`SELECT id_carrito FROM carrito WHERE id_usuario=${idUsuario} FOR UPDATE`;
-      const carrito = await tx.carrito.findUnique({
-        where: { idUsuario },
-        include: {
-          items: {
-            include: {
-              variante: {
-                select: {
-                  sku: true,
-                  producto: {
-                    select: {
-                      nombre: true,
-                      idAtributoPrincipal: true,
-                    },
-                  },
-                  varianteAtributo: {
-                    select: {
-                      valorAtributo: {
-                        select: {
-                          idAtributo: true,
-                          valor: true,
-                          atributo: {
-                            select: {
-                              nombre: true,
-                            },
-                          },
-                        },
-                      },
-                    },
-                  },
-                  inventario: true,
-                },
-              },
-            },
-          },
-        },
-      });
+      const carrito = await pedidoRepository.obtenerCarritoParaCheckout(idUsuario, tx);
 
       if (!carrito || carrito.items.length === 0) {
         throw new AppError('El carrito está vacío', 400);

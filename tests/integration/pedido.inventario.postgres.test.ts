@@ -2,9 +2,10 @@
  * verificada con Neon MCP. Nunca ejecutar contra neondb ni production.
  * npx vitest run tests/integration/pedido.inventario.postgres.test.ts
  */
-import { PrismaClient } from '@prisma/client';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import type { PrismaClient } from '@prisma/client';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
+import { diagnostics } from './helpers/postgres-diagnostics.js';
 
 const enabled = process.env.VENTAS_POSTGRES_TEST === '1';
 const contacto = { nombreContacto: 'Prueba aislada', telefonoContacto: '71234567', direccionEntrega: null };
@@ -12,46 +13,82 @@ let db: PrismaClient;
 let pedidos: typeof import('../../src/services/pedido.service.js');
 let singleton: PrismaClient;
 let commercialRepo: typeof import('../../src/repositories/resolucion-comercial.repository.js');
+let admin: typeof import('../../src/services/comercial-admin.service.js');
+let adminRepo: typeof import('../../src/repositories/comercial-admin.repository.js');
+let cartRepo: typeof import('../../src/repositories/carrito.repository.js');
 const users: number[] = [];
 const products: number[] = [];
 const categories: number[] = [];
 const variants: number[] = [];
+const attributes: number[] = [];
 const options = { timeout: 15000, maxWait: 15000 };
 
 describe.skipIf(!enabled)('ventas: PostgreSQL real aislado', () => {
   beforeAll(async () => {
     const url = new URL(process.env.DATABASE_URL ?? '');
-    if (url.hostname !== 'ep-patient-sun-acc51t0z.sa-east-1.aws.neon.tech' ||
-        url.pathname !== '/fase4b_cutover_empty_20261004' || url.searchParams.get('sslmode') !== 'require') {
+    const neon = url.hostname === 'ep-patient-sun-acc51t0z.sa-east-1.aws.neon.tech' &&
+      url.pathname === '/fase4b_cutover_empty_20261004' && url.searchParams.get('sslmode') === 'require';
+    if (!neon) {
       throw new Error('Pruebas bloqueadas: endpoint/base no autorizados');
     }
-    db = new PrismaClient();
+    // Fixtures, escritores y observador usan el pool existente del servicio.
+    // Cada transacción sigue teniendo su conexión PostgreSQL independiente.
+    singleton = (await import('../../src/config/prisma.js')).default;
+    db = singleton;
+    diagnostics.attach(db, 'integration');
+    // Separar apertura de conexión del primer préstamo del pool (10s por defecto).
+    // No aumenta pool ni timeout transaccional del backend.
+    await diagnostics.operation('connect', () => db.$connect());
     const [identity] = await db.$queryRaw<Array<{ db: string }>>`SELECT current_database() AS db`;
     expect(identity.db).toBe('fase4b_cutover_empty_20261004');
     // No limpiar datos ajenos: fallar si la base dejó de estar vacía.
     expect(await db.producto.count()).toBe(0);
     expect(await db.usuario.count()).toBe(0);
     pedidos = await import('../../src/services/pedido.service.js');
-    singleton = (await import('../../src/config/prisma.js')).default;
     commercialRepo = await import('../../src/repositories/resolucion-comercial.repository.js');
-    // Abrir la conexión del servicio antes de medir transacciones de negocio.
-    // El timeout de production permanece intacto (15 segundos).
-    await singleton.$connect();
-    await singleton.$queryRaw`SELECT 1`;
+    admin = await import('../../src/services/comercial-admin.service.js');
+    adminRepo = await import('../../src/repositories/comercial-admin.repository.js');
+    cartRepo = await import('../../src/repositories/carrito.repository.js');
+    await diagnostics.sessions(db, 'setup-one-client');
   }, 45000);
 
+  beforeEach(async context => {
+    diagnostics.begin(context.task.name);
+    await diagnostics.sessions(db, 'before');
+    const crear = pedidos.crear;
+    const cambiarEstado = pedidos.cambiarEstado;
+    vi.spyOn(pedidos, 'crear').mockImplementation((...args) => diagnostics.operation('pedido.crear', () => crear(...args)));
+    vi.spyOn(pedidos, 'cambiarEstado').mockImplementation((...args) => diagnostics.operation('pedido.cambiarEstado', () => cambiarEstado(...args)));
+  });
+
   afterEach(async () => {
+    vi.restoreAllMocks();
     if (!db) return;
     // Sólo fixtures creadas por esta suite, nunca resets globales.
     await db.movimientoInventario.deleteMany({ where: { idVariante: { in: variants } } });
     await db.pedido.deleteMany({ where: { idUsuario: { in: users } } });
     await db.carrito.deleteMany({ where: { idUsuario: { in: users } } });
     await db.producto.deleteMany({ where: { idProducto: { in: products } } });
+    await db.atributo.deleteMany({ where: { idAtributo: { in: attributes } } });
     await db.categoria.deleteMany({ where: { idCategoria: { in: categories } } });
     await db.usuario.deleteMany({ where: { id_usuario: { in: users } } });
-    users.length = products.length = categories.length = variants.length = 0;
+    users.length = products.length = categories.length = variants.length = attributes.length = 0;
+    const [clean] = await db.$queryRaw<Array<{ fixtures: number; constraints: number }>>`SELECT
+      ((SELECT count(*) FROM producto)+(SELECT count(*) FROM usuario)+(SELECT count(*) FROM categoria)+
+      (SELECT count(*) FROM carrito)+(SELECT count(*) FROM carrito_detalle)+(SELECT count(*) FROM pedido)+
+      (SELECT count(*) FROM pedido_detalle)+(SELECT count(*) FROM inventario)+
+      (SELECT count(*) FROM movimiento_inventario))::int AS fixtures,
+      (SELECT count(*)::int FROM pg_constraint WHERE conname='ventas_test_failure') AS constraints`;
+    expect(clean).toEqual({ fixtures: 0, constraints: 0 });
+    const sessions = await diagnostics.sessions(db, 'after-cleanup');
+    expect(sessions.some(s => s.transaction_ms !== null)).toBe(false);
+    diagnostics.end();
   }, 45000);
-  afterAll(async () => { await singleton?.$disconnect(); await db?.$disconnect(); });
+  afterAll(async () => {
+    try {
+      if (db) expect((await diagnostics.sessions(db, 'before-disconnect')).some(s => s.transaction_ms !== null)).toBe(false);
+    } finally { await db?.$disconnect(); }
+  });
 
   async function fixture(stock: number, base = 50, extraStocks: number[] = []) {
     const key = randomUUID();
@@ -91,10 +128,11 @@ describe.skipIf(!enabled)('ventas: PostgreSQL real aislado', () => {
   }
   // Comprueba bloqueo real mediante PostgreSQL, sin asumirlo por un sleep.
   async function waitBlocked(pid: number) {
+    const start = performance.now();
     const deadline = Date.now() + 8000;
     while (Date.now() < deadline) {
       const [r] = await db.$queryRaw<Array<{ pid: number }>>`SELECT pid FROM pg_stat_activity WHERE ${pid} = ANY(pg_blocking_pids(pid)) ORDER BY pid LIMIT 1`;
-      if (r) return r.pid;
+      if (r) { diagnostics.blocked(pid, r.pid, performance.now()-start); return r.pid; }
       await new Promise(r => setTimeout(r, 30));
     }
     throw new Error('No se observó el bloqueo esperado en PostgreSQL');
@@ -119,6 +157,20 @@ describe.skipIf(!enabled)('ventas: PostgreSQL real aislado', () => {
     const f = await fixture(20, 1); const c = await cart(f.vs, f.pres, [5]);
     await pedidos.crear(c.user, contacto); expect(await stock(f.vs[0])).toBe(15);
   }, 45000);
+  it('lectura consolidada conserva producto, SKU y atributo principal histórico', async () => {
+    const f=await fixture(2000);const c=await cart(f.vs,f.pres,[3]);
+    const atributo=await db.atributo.create({data:{nombre:`Color diagnóstico ${randomUUID()}`}});
+    attributes.push(atributo.idAtributo);
+    const valor=await db.valorAtributo.create({data:{idAtributo:atributo.idAtributo,valor:'Dorado'}});
+    await db.producto.update({where:{idProducto:products[0]},data:{idAtributoPrincipal:atributo.idAtributo}});
+    await db.varianteAtributo.create({data:{idVariante:f.vs[0],idValor:valor.idValor}});
+    const v=await db.productoVariante.findUniqueOrThrow({where:{idVariante:f.vs[0]}});
+    const p=await pedidos.crear(c.user,contacto);
+    const d=await db.pedidoDetalle.findFirstOrThrow({where:{idPedido:p.idPedido}});
+    expect(d).toMatchObject({nombreProductoSnapshot:'Producto aislado',skuSnapshot:v.sku,
+      nombreAtributoPrincipalSnapshot:atributo.nombre,valorAtributoPrincipalSnapshot:'Dorado',
+      presentacionNombre:'Pack x50',cantidadBasePresentacion:50,cantidad:3});
+  },45000);
   it('multi-item: insuficiencia del segundo revierte el primer descuento', async () => {
     const f = await fixture(100, 50, [199]); const c = await cart(f.vs, f.pres, [2, 4]);
     await expect(pedidos.crear(c.user, contacto)).rejects.toThrow('Stock insuficiente'); await unchanged(c, [100, 199]);
@@ -178,27 +230,20 @@ describe.skipIf(!enabled)('ventas: PostgreSQL real aislado', () => {
   }, 45000);
   it('SHARE impide editar cantidadBase mientras checkout usa la presentación', async () => {
     const f = await fixture(2000); const c = await cart(f.vs, f.pres, [3]);
-    const locked = latch(); const release = latch(); let pid = 0;
-    const holder = db.$transaction(async tx => {
-      const [r] = await tx.$queryRaw<Array<{ pid: number }>>`SELECT pg_backend_pid() AS pid`; pid = r.pid;
-      await tx.$queryRaw`SELECT id_inventario FROM inventario WHERE id_variante=${f.vs[0]} FOR UPDATE`;
-      locked.resolve(); await release.promise;
+    const pause = pausarCheckoutProtegido();
+    const outcome = pedidos.crear(c.user, contacto).then(p => ({ p }), error => ({ error }));
+    await Promise.race([pause.locked.promise, outcome.then(() => { throw new Error('Checkout terminó antes del lock'); })]);
+    const writer = db.$transaction(async tx => {
+      await tx.presentacionVenta.update({ where: { idPresentacion: f.pres }, data: { cantidadBase: 100 } });
     }, options);
-    await locked.promise;
-    const checkout = pedidos.crear(c.user, contacto);
-    // Adjuntar un handler inmediatamente para evitar rechazos no manejados si falla la prueba.
-    const outcome = checkout.then(p => ({ p }), error => ({ error }));
-    try {
-      await waitBlocked(pid); // Checkout pasó su SHARE y ahora espera el inventario.
-      await expect(db.$transaction(async tx => {
-        await tx.$executeRawUnsafe("SET LOCAL lock_timeout = '500ms'");
-        await tx.presentacionVenta.update({ where: { idPresentacion: f.pres }, data: { cantidadBase: 100 } });
-      }, options)).rejects.toThrow(/lock timeout/);
-    } finally { release.resolve(); await holder; }
+    writer.catch(() => undefined);
+    try { await waitBlocked(pause.pid()); }
+    finally { pause.release.resolve(); await Promise.allSettled([outcome, writer]); }
+    await writer;
     const result = await outcome; if ('error' in result) throw result.error;
     expect(await stock(f.vs[0])).toBe(1850);
     expect(await db.pedidoDetalle.findFirst({ where: { idPedido: result.p.idPedido } })).toMatchObject({ cantidadBasePresentacion: 50 });
-    await db.presentacionVenta.update({ where: { idPresentacion: f.pres }, data: { cantidadBase: 100 } });
+    expect((await db.presentacionVenta.findUniqueOrThrow({ where: { idPresentacion: f.pres } })).cantidadBase).toBe(100);
     await pedidos.cambiarEstado(result.p.idPedido, 'CANCELADO'); expect(await stock(f.vs[0])).toBe(2000);
   }, 45000);
   it('si el editor adquirió primero el lock, checkout espera y usa el nuevo valor completo', async () => {
@@ -211,7 +256,7 @@ describe.skipIf(!enabled)('ventas: PostgreSQL real aislado', () => {
     }, options);
     await locked.promise;
     const outcome = pedidos.crear(c.user, contacto).then(p => ({ p }), error => ({ error }));
-    try { await waitBlocked(pid); } finally { release.resolve(); await editor; }
+    try { await waitBlocked(pid); } finally { release.resolve(); await Promise.allSettled([editor, outcome]); }
     const result = await outcome; if ('error' in result) throw result.error;
     expect(await stock(f.vs[0])).toBe(1700);
     expect(await db.pedidoDetalle.findFirst({ where: { idPedido: result.p.idPedido } })).toMatchObject({ cantidadBasePresentacion: 100, presentacionNombre: 'Pack x100' });
@@ -226,32 +271,22 @@ describe.skipIf(!enabled)('ventas: PostgreSQL real aislado', () => {
     const f = await fixture(2000);
     const rule = await db.reglaPrecioCantidad.create({ data: { idListaPrecio: f.lista, nombre: 'Desde tres', cantidadMinima: 3, precioPorPresentacion: 30 } });
     const c = await cart(f.vs, f.pres, [5]);
-    const locked = latch(); const release = latch(); let pid = 0;
-    const holder = db.$transaction(async tx => {
-      const [r] = await tx.$queryRaw<Array<{ pid: number }>>`SELECT pg_backend_pid() AS pid`; pid = r.pid;
-      await tx.$queryRaw`SELECT id_inventario FROM inventario WHERE id_variante=${f.vs[0]} FOR UPDATE`;
-      locked.resolve(); await release.promise;
-    }, options);
-    await locked.promise;
+    const pause = pausarCheckoutProtegido();
     const checkout = pedidos.crear(c.user, contacto).then(p => ({ p }), error => ({ error }));
-    let writer: Promise<void> | undefined;
-    let writerOutcome: Promise<{ error?: unknown }> | undefined;
-    try {
-      const checkoutPid = await waitBlocked(pid);
-      writer = db.$transaction(async tx => {
-        if (kind === 'perfil') await tx.perfilPrecio.update({ where: { idPerfilPrecio: f.perfil }, data: { nombre: 'Editado' } });
-        else if (kind === 'lista') await tx.listaPrecio.update({ where: { idListaPrecio: f.lista }, data: { nombre: 'Editada' } });
-        else {
-          // Mismo contrato y helper obligatorio utilizado por el Admin real.
-          await commercialRepo.bloquearListasParaEscrituraReglas([f.lista], tx);
-          if (kind === 'update regla') await tx.reglaPrecioCantidad.update({ where: { idReglaPrecio: rule.idReglaPrecio }, data: { precioPorPresentacion: 35 } });
-          if (kind === 'delete regla') await tx.reglaPrecioCantidad.delete({ where: { idReglaPrecio: rule.idReglaPrecio } });
-          if (kind === 'insert regla') await tx.reglaPrecioCantidad.create({ data: { idListaPrecio: f.lista, nombre: 'Desde cinco', cantidadMinima: 5, precioPorPresentacion: 25 } });
-        }
-      }, options);
-      writerOutcome = writer.then(() => ({}), error => ({ error }));
-      await waitBlocked(checkoutPid); // PostgreSQL confirma que la escritura espera al checkout.
-    } finally { release.resolve(); await holder; }
+    await Promise.race([pause.locked.promise, checkout.then(() => { throw new Error('Checkout terminó antes del lock'); })]);
+    const writer = db.$transaction(async tx => {
+      if (kind === 'perfil') await tx.perfilPrecio.update({ where: { idPerfilPrecio: f.perfil }, data: { nombre: 'Editado' } });
+      else if (kind === 'lista') await tx.listaPrecio.update({ where: { idListaPrecio: f.lista }, data: { nombre: 'Editada' } });
+      else {
+        await commercialRepo.bloquearListasParaEscrituraReglas([f.lista], tx);
+        if (kind === 'update regla') await tx.reglaPrecioCantidad.update({ where: { idReglaPrecio: rule.idReglaPrecio }, data: { precioPorPresentacion: 35 } });
+        if (kind === 'delete regla') await tx.reglaPrecioCantidad.delete({ where: { idReglaPrecio: rule.idReglaPrecio } });
+        if (kind === 'insert regla') await tx.reglaPrecioCantidad.create({ data: { idListaPrecio: f.lista, nombre: 'Desde cinco', cantidadMinima: 5, precioPorPresentacion: 25 } });
+      }
+    }, options);
+    const writerOutcome = writer.then(() => ({}), error => ({ error }));
+    try { await waitBlocked(pause.pid()); }
+    finally { pause.release.resolve(); await Promise.allSettled([checkout, writerOutcome]); }
     const result = await checkout; if ('error' in result) throw result.error;
     const edited = await writerOutcome; if (edited?.error) throw edited.error;
     expect(result.p.total.toFixed(2)).toBe('150.00'); expect(await stock(f.vs[0])).toBe(1750);
@@ -275,7 +310,7 @@ describe.skipIf(!enabled)('ventas: PostgreSQL real aislado', () => {
     }, options);
     await locked.promise;
     const checkout = pedidos.crear(c.user, contacto).then(p => ({ p }), error => ({ error }));
-    try { await waitBlocked(pid); } finally { release.resolve(); await editor; }
+    try { await waitBlocked(pid); } finally { release.resolve(); await Promise.allSettled([editor, checkout]); }
     const r = await checkout; if ('error' in r) throw r.error;
     expect(r.p.total.toFixed(2)).toBe('125.00');
     expect((await db.pedidoDetalle.findFirstOrThrow({ where: { idPedido: r.p.idPedido } })).precioUnitario.toFixed(2)).toBe('25.00');
@@ -326,4 +361,131 @@ describe.skipIf(!enabled)('ventas: PostgreSQL real aislado', () => {
       { tipo: 'Entrada', cantidad: 50, stockAnterior: 100, stockNuevo: 150 },
     ]);
   }, 45000);
+
+  async function matrix(f: Awaited<ReturnType<typeof fixture>>) {
+    const product = products[0];
+    const p = await db.presentacionVenta.create({ data: { idProducto: product, nombre: 'Unidad', cantidadBase: 1 } });
+    const profile = await db.perfilPrecio.create({ data: { idProducto: product, nombre: 'Especial' } });
+    for (const [pres, perfil] of [[f.pres, profile.idPerfilPrecio], [p.idPresentacion, f.perfil], [p.idPresentacion, profile.idPerfilPrecio]]) {
+      await db.listaPrecio.create({ data: { idProducto: product, idPresentacion: pres, idPerfilPrecio: perfil, nombre: `Matriz ${pres}/${perfil}`, reglas: { create: { nombre: 'Base', cantidadMinima: 1, precioPorPresentacion: '32', principal: true } } } });
+    }
+    return { product, pres: p.idPresentacion, profile: profile.idPerfilPrecio };
+  }
+  it('Admin cambia presentación principal sin dos principales ni listas nuevas', async () => {
+    const f = await fixture(2000); const m = await matrix(f);
+    await admin.guardarPresentacion(m.product, m.pres, { principal: true });
+    expect(await db.presentacionVenta.count({ where: { idProducto: m.product, activo: true, principal: true } })).toBe(1);
+    expect((await admin.obtenerConfiguracion(m.product)).presentaciones.find(p => p.principal)?.idPresentacion).toBe(m.pres);
+  }, 90000);
+  it('Admin cambia perfil principal y NULL hereda nuevo perfil', async () => {
+    const f = await fixture(2000); const m = await matrix(f);
+    await admin.guardarPerfil(m.product, m.profile, { principal: true });
+    expect(await db.perfilPrecio.count({ where: { idProducto: m.product, activo: true, principal: true } })).toBe(1);
+    expect((await admin.obtenerConfiguracion(m.product)).variantes[0].perfilEfectivo?.idPerfilPrecio).toBe(m.profile);
+  }, 90000);
+  it('Admin asigna perfil explícito y NULL vuelve a heredar', async () => {
+    const f = await fixture(2000); const m = await matrix(f);
+    await admin.asignarPerfiles(m.product, [{ idVariante: f.vs[0], idPerfilPrecio: m.profile }]);
+    expect((await db.productoVariante.findUniqueOrThrow({ where: { idVariante: f.vs[0] } })).idPerfilPrecio).toBe(m.profile);
+    await admin.asignarPerfiles(m.product, [{ idVariante: f.vs[0], idPerfilPrecio: null }]);
+    expect((await admin.obtenerConfiguracion(m.product)).variantes[0]).toMatchObject({ idPerfilPrecio: null, perfilEfectivo: { idPerfilPrecio: f.perfil } });
+  }, 90000);
+  it('Admin lote inválido hace rollback de todas las asignaciones', async () => {
+    const f = await fixture(2000, 50, [2000]); const m = await matrix(f);
+    await expect(admin.asignarPerfiles(m.product, [{ idVariante: f.vs[0], idPerfilPrecio: m.profile }, { idVariante: 2147483647, idPerfilPrecio: m.profile }])).rejects.toThrow('variante');
+    expect((await db.productoVariante.findMany({ where: { idVariante: { in: f.vs } } })).map(v => v.idPerfilPrecio)).toEqual([null, null]);
+  }, 90000);
+  it('Admin crea borrador, lo configura y activa sin inventar precios', async () => {
+    const f = await fixture(2000);
+    const p = await admin.guardarPresentacion(products[0], null, { nombre: 'Unidad', cantidadBase: 1 });
+    const l = await admin.guardarLista(products[0], null, { nombre: 'Unidad', idPresentacion: p.idPresentacion, idPerfilPrecio: f.perfil, principal: false, activo: false, reglas: [] });
+    await admin.guardarRegla(products[0], l.idListaPrecio, null, { nombre: 'Base', cantidadMinima: 1, precioPorPresentacion: '5' });
+    const rules = (await admin.obtenerConfiguracion(products[0])).listas.find(x => x.idListaPrecio === l.idListaPrecio)!.reglas;
+    await admin.guardarLista(products[0], l.idListaPrecio, { nombre: 'Unidad', principal: false, activo: true, reglas: rules });
+    await admin.guardarPresentacion(products[0], p.idPresentacion, { activo: true });
+    expect((await admin.obtenerConfiguracion(products[0])).listas.find(x => x.idListaPrecio === l.idListaPrecio)?.vendible).toBe(true);
+  }, 90000);
+  function pausarCheckoutProtegido() {
+    const locked = latch(); const release = latch(); let pid = 0;
+    const original = commercialRepo.bloquearReglasParaVenta;
+    vi.spyOn(commercialRepo, 'bloquearReglasParaVenta').mockImplementation(async (ids, tx) => {
+      await original(ids, tx);
+      const [r] = await tx.$queryRaw<Array<{pid:number}>>`SELECT pg_backend_pid() pid`;
+      pid = r.pid; locked.resolve(); await release.promise;
+    });
+    return { locked, release, pid: () => pid };
+  }
+  it.each(['editar', 'insertar'] as const)('Admin %s regla espera a checkout y conserva su precio completo', async operation => {
+    const f = await fixture(2000); const c = await cart(f.vs, f.pres, [5]);
+    const rule = await db.reglaPrecioCantidad.create({ data: { idListaPrecio: f.lista, nombre: 'Tres', cantidadMinima: 3, precioPorPresentacion: 30 } });
+    const pause = pausarCheckoutProtegido();
+    const checkout = pedidos.crear(c.user, contacto).then(p => ({ p }), error => ({ error }));
+    await Promise.race([pause.locked.promise, checkout.then(() => { throw new Error('Checkout terminó antes del lock'); })]);
+    const writer = admin.guardarRegla(products[0], f.lista, operation === 'editar' ? rule.idReglaPrecio : null,
+      operation === 'editar' ? { precioPorPresentacion: '35' } : { nombre: 'Cinco', cantidadMinima: 5, precioPorPresentacion: '25' });
+    writer.catch(() => undefined);
+    try { await waitBlocked(pause.pid()); }
+    finally { pause.release.resolve(); await Promise.allSettled([checkout, writer]); }
+    await writer; const result = await checkout; if ('error' in result) throw result.error;
+    expect(result.p.total.toFixed(2)).toBe('150.00');
+  }, 90000);
+  it('Admin posee lock primero: checkout espera y lee nueva regla completa', async () => {
+    const f = await fixture(2000); const c = await cart(f.vs, f.pres, [5]);
+    const locked = latch(); const release = latch(); let pid = 0;
+    const original = adminRepo.crearRegla;
+    vi.spyOn(adminRepo, 'crearRegla').mockImplementation(async (tx, data) => {
+      const [r] = await tx.$queryRaw<Array<{pid:number}>>`SELECT pg_backend_pid() pid`; pid = r.pid;
+      const rule = await original(tx, data); locked.resolve(); await release.promise; return rule;
+    });
+    const writer = admin.guardarRegla(products[0], f.lista, null, { nombre: 'Cinco', cantidadMinima: 5, precioPorPresentacion: '25' });
+    await Promise.race([locked.promise, writer.then(() => { throw new Error('Writer terminó antes del lock'); })]);
+    const checkout = pedidos.crear(c.user, contacto).then(p => ({ p }), error => ({ error }));
+    try { await waitBlocked(pid); } finally { release.resolve(); await Promise.allSettled([writer, checkout]); }
+    await writer; const result = await checkout; if ('error' in result) throw result.error;
+    expect(result.p.total.toFixed(2)).toBe('125.00');
+  }, 90000);
+  it('Admin cantidadBase espera checkout y snapshot conserva valor anterior', async () => {
+    const f = await fixture(2000); const c = await cart(f.vs, f.pres, [3]);
+    const pause = pausarCheckoutProtegido();
+    const checkout = pedidos.crear(c.user, contacto).then(p => ({ p }), error => ({ error }));
+    await Promise.race([pause.locked.promise, checkout.then(() => { throw new Error('Checkout terminó antes del lock'); })]);
+    const writer = admin.guardarPresentacion(products[0], f.pres, { cantidadBase: 100 });
+    writer.catch(() => undefined);
+    try { await waitBlocked(pause.pid()); }
+    finally { pause.release.resolve(); await Promise.allSettled([checkout, writer]); }
+    await writer; const result = await checkout; if ('error' in result) throw result.error;
+    expect((await db.pedidoDetalle.findFirstOrThrow({ where: { idPedido: result.p.idPedido } })).cantidadBasePresentacion).toBe(50);
+    expect((await db.presentacionVenta.findUniqueOrThrow({ where: { idPresentacion: f.pres } })).cantidadBase).toBe(100);
+  }, 90000);
+  it.each(['desactivar', 'cantidadBase'] as const)('carrito entra primero: Admin %s espera y rechaza por uso', async operation => {
+    const f = await fixture(2000); const m = await matrix(f); const c = await cart(f.vs, f.pres, [1]);
+    await db.carritoDetalle.deleteMany({ where: { idCarrito: c.id } });
+    const locked = latch(); const release = latch(); let pid = 0;
+    const original = commercialRepo.bloquearPresentacionesParaVenta;
+    vi.spyOn(commercialRepo, 'bloquearPresentacionesParaVenta').mockImplementation(async (ids, tx) => {
+      await original(ids, tx); const [r] = await tx.$queryRaw<Array<{pid:number}>>`SELECT pg_backend_pid() pid`; pid = r.pid; locked.resolve(); await release.promise;
+    });
+    const add = cartRepo.agregarItemAtomico(c.user, f.vs[0], m.pres, 3);
+    await Promise.race([locked.promise, add.then(() => { throw new Error('Add terminó antes del lock'); })]);
+    const edit = admin.guardarPresentacion(m.product, m.pres, operation === 'desactivar' ? { activo: false } : { cantidadBase: 100 }).then(() => null, e => e as Error);
+    try { await waitBlocked(pid); } finally { release.resolve(); await Promise.allSettled([add, edit]); }
+    await add; expect((await edit)?.message).toContain('en uso');
+    expect(await db.carritoDetalle.count({ where: { idCarrito: c.id, idPresentacion: m.pres } })).toBe(1);
+    expect((await db.presentacionVenta.findUniqueOrThrow({ where: { idPresentacion: m.pres } }))).toMatchObject({ activo: true, cantidadBase: 1 });
+  }, 90000);
+  it.each(['desactivar', 'cantidadBase'] as const)('Admin entra primero: carrito %s revalida después del lock', async operation => {
+    const f = await fixture(149); const m = await matrix(f); const c = await cart(f.vs, f.pres, [1]);
+    await db.carritoDetalle.deleteMany({ where: { idCarrito: c.id } });
+    const locked = latch(); const release = latch(); let pid = 0;
+    const original = adminRepo.editarPresentacion;
+    vi.spyOn(adminRepo, 'editarPresentacion').mockImplementation(async (tx, id, data) => {
+      const r = await original(tx, id, data); const [p] = await tx.$queryRaw<Array<{pid:number}>>`SELECT pg_backend_pid() pid`; pid = p.pid; locked.resolve(); await release.promise; return r;
+    });
+    const edit = admin.guardarPresentacion(m.product, m.pres, operation === 'desactivar' ? { activo: false } : { cantidadBase: 100 });
+    await Promise.race([locked.promise, edit.then(() => { throw new Error('Edit terminó antes del lock'); })]);
+    const add = cartRepo.agregarItemAtomico(c.user, f.vs[0], m.pres, 2).then(() => null, e => e as Error);
+    try { await waitBlocked(pid); } finally { release.resolve(); await Promise.allSettled([edit, add]); }
+    await edit; expect((await add)?.message).toContain(operation === 'desactivar' ? 'CART_VARIANT_NOT_AVAILABLE' : 'CART_INSUFFICIENT_STOCK');
+    expect(await db.carritoDetalle.count({ where: { idCarrito: c.id } })).toBe(0);
+  }, 90000);
 });

@@ -1,6 +1,6 @@
 import { Prisma } from '@prisma/client';
 import prisma from '../config/prisma.js';
-import type { ListaPrecioInput, ReglaPrecioCantidadInput } from '../validations/precio-cantidad.validation.js';
+import type { ReglaPrecioCantidadInput } from '../validations/precio-cantidad.validation.js';
 import { bloquearListasParaEscrituraReglas } from './resolucion-comercial.repository.js';
 
 const seleccionRegla = { idReglaPrecio: true, nombre: true, cantidadMinima: true, precioPorPresentacion: true, principal: true, activo: true, orden: true } satisfies Prisma.ReglaPrecioCantidadSelect;
@@ -9,7 +9,7 @@ type Tx = Prisma.TransactionClient;
 
 const datosRegla = (regla: ReglaPrecioCantidadInput) => ({ nombre: regla.nombre, cantidadMinima: regla.cantidadMinima, precioPorPresentacion: new Prisma.Decimal(regla.precioPorPresentacion), activo: regla.activo, orden: regla.orden });
 
-const sincronizarReglas = async (tx: Tx, idListaPrecio: number, reglas: ReglaPrecioCantidadInput[]) => {
+export const sincronizarReglas = async (tx: Tx, idListaPrecio: number, reglas: ReglaPrecioCantidadInput[]) => {
   await bloquearListasParaEscrituraReglas([idListaPrecio], tx);
   const actuales = await tx.reglaPrecioCantidad.findMany({ where: { idListaPrecio }, select: { idReglaPrecio: true } });
   const ids = new Set(actuales.map((regla) => regla.idReglaPrecio));
@@ -26,8 +26,7 @@ const sincronizarReglas = async (tx: Tx, idListaPrecio: number, reglas: ReglaPre
     guardadas.push({ ...resultado, principal: regla.principal });
   }
   const principal = guardadas.find((regla) => regla.principal && regla.activo);
-  if (!principal) throw new Error('PRINCIPAL_NO_ENCONTRADA');
-  await tx.reglaPrecioCantidad.update({ where: { idReglaPrecio: principal.idReglaPrecio }, data: { principal: true } });
+  if (principal) await tx.reglaPrecioCantidad.update({ where: { idReglaPrecio: principal.idReglaPrecio }, data: { principal: true } });
   return tx.reglaPrecioCantidad.findMany({ where: { idListaPrecio }, select: seleccionRegla, orderBy: [{ orden: 'asc' }, { idReglaPrecio: 'asc' }] });
 };
 
@@ -46,37 +45,6 @@ export const obtenerConfiguracion = (idProducto: number) => prisma.producto.find
     orderBy: { idVariante: 'asc' },
   },
 } });
-
-export const guardarLista = (idProducto: number, idListaPrecio: number | null, input: ListaPrecioInput) => prisma.$transaction(async (tx) => {
-  if (!await tx.producto.findUnique({ where: { idProducto }, select: { idProducto: true } })) return null;
-  // Si se cambia la principal, UPDATE toca todas las listas: bloquearlas antes en orden.
-  const ids = input.principal && input.activo
-    ? (await tx.listaPrecio.findMany({ where: { idProducto }, select: { idListaPrecio: true } })).map(l => l.idListaPrecio)
-    : idListaPrecio === null ? [] : [idListaPrecio];
-  await bloquearListasParaEscrituraReglas(ids, tx);
-  const actual = idListaPrecio ? await tx.listaPrecio.findFirst({ where: { idListaPrecio, idProducto }, select: { idListaPrecio: true, principal: true, activo: true } }) : null;
-  if (idListaPrecio && !actual) throw new Error('LISTA_NO_PERTENECE_AL_PRODUCTO');
-  if (actual?.principal && actual.activo && (!input.principal || !input.activo)) {
-    const otraPrincipal = await tx.listaPrecio.count({ where: { idProducto, principal: true, activo: true, NOT: { idListaPrecio: actual.idListaPrecio } } });
-    if (!otraPrincipal) throw new Error('LISTA_PRINCIPAL_REQUERIDA');
-  }
-  if (!idListaPrecio && !input.principal && !await tx.listaPrecio.count({ where: { idProducto, principal: true, activo: true } })) throw new Error('LISTA_PRINCIPAL_REQUERIDA');
-  if (input.principal && input.activo) await tx.listaPrecio.updateMany({ where: { idProducto }, data: { principal: false } });
-  const lista = idListaPrecio
-    ? await tx.listaPrecio.update({ where: { idListaPrecio }, data: { nombre: input.nombre, principal: input.principal, activo: input.activo }, select: { idListaPrecio: true } })
-    : await tx.listaPrecio.create({ data: { idProducto, nombre: input.nombre, principal: input.principal, activo: input.activo }, select: { idListaPrecio: true } });
-  const reglas = await sincronizarReglas(tx, lista.idListaPrecio, input.reglas);
-  return { idListaPrecio: lista.idListaPrecio, reglas };
-});
-
-export const eliminarLista = (idProducto: number, idListaPrecio: number) => prisma.$transaction(async (tx) => {
-  const lista = await tx.listaPrecio.findFirst({ where: { idListaPrecio, idProducto }, select: { principal: true, activo: true } });
-  if (!lista) return 'NO_ENCONTRADA' as const;
-  if (lista.principal && lista.activo) return 'PRINCIPAL' as const;
-  if (await tx.productoVariante.count({ where: { idListaPrecio } })) return 'ASIGNADA' as const;
-  await tx.listaPrecio.delete({ where: { idListaPrecio } });
-  return 'ELIMINADA' as const;
-});
 
 export const asignarLista = (idProducto: number, idsVariante: number[], idListaPrecio: number | null) => prisma.$transaction(async (tx) => {
   const variantes = await tx.productoVariante.count({ where: { idProducto, idVariante: { in: idsVariante } } });

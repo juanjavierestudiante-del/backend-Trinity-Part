@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import prisma from '../config/prisma.js';
+import { bloquearPresentacionesParaVenta, bloquearVariantesParaVenta } from './resolucion-comercial.repository.js';
 
 export interface CarritoItemView {
   idDetalle: number;
@@ -104,7 +105,14 @@ export const obtenerVistaPorUsuario = async (idUsuario: number): Promise<Carrito
 };
 
 export const agregarItemAtomico = (idUsuario: number, idVariante: number, idPresentacion: number, cantidad: number) =>
-  prisma.$queryRaw<AgregarItemRow[]>`SELECT * FROM agregar_item_carrito(${idUsuario}::integer, ${idVariante}::integer, ${idPresentacion}::integer, ${cantidad}::integer)`;
+  prisma.$transaction(async tx => {
+    // Mismo orden de checkout. La función conserva validación, stock y upsert.
+    await tx.carrito.upsert({ where: { idUsuario }, create: { idUsuario }, update: {} });
+    await tx.$queryRaw`SELECT id_carrito FROM carrito WHERE id_usuario=${idUsuario} FOR UPDATE`;
+    await bloquearVariantesParaVenta([idVariante], tx);
+    await bloquearPresentacionesParaVenta([idPresentacion], tx);
+    return tx.$queryRaw<AgregarItemRow[]>`SELECT * FROM agregar_item_carrito(${idUsuario}::integer, ${idVariante}::integer, ${idPresentacion}::integer, ${cantidad}::integer)`;
+  }, { timeout: 15000, maxWait: 15000 });
 
 export const actualizarCantidadPropia = async (idUsuario: number, idDetalle: number, cantidad: number) => prisma.$transaction(async tx => {
   await tx.$queryRaw`SELECT c.id_carrito FROM carrito c JOIN carrito_detalle cd ON cd.id_carrito=c.id_carrito WHERE c.id_usuario=${idUsuario} AND cd.id_detalle=${idDetalle} FOR UPDATE OF c`;

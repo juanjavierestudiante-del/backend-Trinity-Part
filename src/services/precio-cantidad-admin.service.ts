@@ -1,5 +1,7 @@
 import { Prisma } from '@prisma/client';
 import * as repository from '../repositories/precio-cantidad-admin.repository.js';
+import * as comercial from './comercial-admin.service.js';
+import type { ListaComercialInput } from '../validations/comercial-admin.validation.js';
 import { ErrorPrecioCantidad } from '../types/precio-cantidad.types.js';
 import { resolverPrecioUmbral } from '../utils/resolver-precio-umbral.js';
 import { AppError } from '../utils/helpers.js';
@@ -43,25 +45,14 @@ export const obtenerConfiguracion = async (idProducto: number) => {
   };
 };
 
-export const guardarLista = async (idProducto: number, idListaPrecio: number | null, input: ListaPrecioInput) => {
-  validarLista(input);
-  try {
-    const resultado = await repository.guardarLista(idProducto, idListaPrecio, input);
-    if (!resultado) throw new AppError('Producto no encontrado', 404);
-    return { idListaPrecio: resultado.idListaPrecio, reglas: resultado.reglas.map(serializarRegla) };
-  } catch (error) {
-    if (error instanceof Error && error.message === 'LISTA_NO_PERTENECE_AL_PRODUCTO') throw new AppError('La lista no pertenece al producto indicado.', 400);
-    if (error instanceof Error && error.message === 'LISTA_PRINCIPAL_REQUERIDA') throw new AppError('El producto debe conservar una lista principal activa.', 400);
-    if (error instanceof Error && error.message === 'REGLA_NO_PERTENECE_A_LISTA') throw new AppError('Una regla no pertenece a esta lista.', 400);
-    throw error;
-  }
+export const guardarLista = async (idProducto: number, idListaPrecio: number | null, input: ListaComercialInput) => {
+  // Conserva la validación del editor anterior, sin usar asignaciones legacy.
+  if (input.activo && input.idPresentacion === undefined && input.idPerfilPrecio === undefined) validarLista({ ...input, principal: input.principal ?? false });
+  return comercial.guardarLista(idProducto, idListaPrecio, input);
 };
 
 export const eliminarLista = async (idProducto: number, idListaPrecio: number) => {
-  const resultado = await repository.eliminarLista(idProducto, idListaPrecio);
-  if (resultado === 'NO_ENCONTRADA') throw new AppError('Lista no encontrada.', 404);
-  if (resultado === 'PRINCIPAL') throw new AppError('Define otra lista principal antes de eliminar esta lista.', 400);
-  if (resultado === 'ASIGNADA') throw new AppError('Reasigna las variantes antes de eliminar esta lista.', 400);
+  await comercial.eliminarLista(idProducto, idListaPrecio);
 };
 
 export const asignarLista = async (idProducto: number, input: AsignarListaPrecioInput) => {
